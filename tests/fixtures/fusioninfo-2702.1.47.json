@@ -1,0 +1,18 @@
+{
+  "connection": "https://dl.appstreaming.autodesk.com/production/",
+  "install_path": "\\\\?\\C:\\Program Files\\Autodesk\\webdeploy\\production\\6f81bda0bb0ebef0ea118cf2bd48cba17061ffb5\\Fusion360.exe",
+  "manifest": {
+    "build-version": "2702.1.47",
+    "major-update-version": "2.0.1986",
+    "release-version": "20260412194756",
+    "properties": {
+      "display-name": "Autodesk Fusion"
+    },
+    "streamer": {
+      "feature-version": "20260227094542",
+      "release-id": "2702"
+    }
+  },
+  "stream": "production",
+  "uuid": "73e72ada57b7480280f7a6f4a289729f"
+}

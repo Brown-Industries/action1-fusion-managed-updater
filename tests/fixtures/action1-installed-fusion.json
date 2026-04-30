@@ -1,0 +1,8 @@
+{
+  "items": [
+    { "fields": { "Name": "Autodesk Fusion", "Version": "2701.1.27", "Endpoints": "2" } },
+    { "fields": { "Name": "Autodesk Fusion", "Version": "2702.1.47", "Endpoints": "1" } },
+    { "fields": { "Name": "Autodesk Fusion", "Version": "2702.1.58", "Endpoints": "1" } },
+    { "fields": { "Name": "Autodesk Fusion 360", "Version": "2.0.17453", "Endpoints": "1" } }
+  ]
+}
