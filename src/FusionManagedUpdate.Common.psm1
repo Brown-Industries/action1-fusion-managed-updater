@@ -124,4 +124,14 @@ function Get-LatestFusionStreamer {
     return $candidate
 }
 
-Export-ModuleMember -Function ConvertTo-FusionVersionParts, Compare-FusionVersion, Read-FusionInfoFile, Get-HighestFusionInventoryVersion, New-HistoricalVersionWarning, Get-AutodeskInstallerHead, ConvertFrom-AutodeskInstallerHeadRecord, Get-LatestFusionStreamer
+function Get-FusionBlockingProcesses {
+    param($Processes = $null)
+
+    if ($null -eq $Processes) {
+        $Processes = Get-Process -ErrorAction SilentlyContinue
+    }
+    $names = @('Fusion360', 'FusionLauncher', 'FusionService')
+    return $Processes | Where-Object { $names -contains $_.ProcessName }
+}
+
+Export-ModuleMember -Function ConvertTo-FusionVersionParts, Compare-FusionVersion, Read-FusionInfoFile, Get-HighestFusionInventoryVersion, New-HistoricalVersionWarning, Get-AutodeskInstallerHead, ConvertFrom-AutodeskInstallerHeadRecord, Get-LatestFusionStreamer, Get-FusionBlockingProcesses
