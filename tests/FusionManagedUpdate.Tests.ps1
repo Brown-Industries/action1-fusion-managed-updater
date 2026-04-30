@@ -103,6 +103,11 @@ Assert-True ($versionBody.description -eq $versionDescription) 'Action1 version 
 Assert-Equal $versionBody.silent_install_switches '' 'Action1 payload launcher needs no switches'
 Assert-Equal $versionBody.success_exit_codes '0' 'Action1 success exit code is zero'
 
+$unchangedDryRun = New-FusionWatcherDryRunResult -State $autodeskHead -AutodeskHead $autodeskHead -BuildVersion '2702.1.58' -DetectedDate '2026-04-30' -PayloadFileName 'FusionManagedUpdater.cmd'
+Assert-Equal $unchangedDryRun.Changed $false 'Fusion watcher dry-run result reports unchanged installer state'
+Assert-Equal $unchangedDryRun.AutodeskHead.ETag $autodeskHead.ETag 'Fusion watcher dry-run result includes Autodesk HEAD when unchanged'
+Assert-Equal $unchangedDryRun.Action1VersionBody.version '2702.1.58' 'Fusion watcher dry-run result includes Action1 version body when unchanged'
+
 $payloadTempRoot = Join-Path $env:TEMP ('fmu-payload-test-' + [guid]::NewGuid().ToString('N'))
 $payloadOutput = Join-Path $payloadTempRoot 'FusionManagedUpdater.cmd'
 try {

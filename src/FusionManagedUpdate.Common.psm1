@@ -107,6 +107,31 @@ function New-Action1FusionVersionBody {
     }
 }
 
+function Test-AutodeskHeadChanged {
+    param(
+        [Parameter(Mandatory = $true)]$State,
+        [Parameter(Mandatory = $true)]$AutodeskHead
+    )
+
+    return ($State.ETag -ne $AutodeskHead.ETag) -or ($State.LastModified -ne $AutodeskHead.LastModified) -or ($State.ContentLength -ne $AutodeskHead.ContentLength)
+}
+
+function New-FusionWatcherDryRunResult {
+    param(
+        [Parameter(Mandatory = $true)]$State,
+        [Parameter(Mandatory = $true)]$AutodeskHead,
+        [Parameter(Mandatory = $true)][string]$BuildVersion,
+        [Parameter(Mandatory = $true)][string]$DetectedDate,
+        [Parameter(Mandatory = $true)][string]$PayloadFileName
+    )
+
+    [pscustomobject]@{
+        Changed            = Test-AutodeskHeadChanged -State $State -AutodeskHead $AutodeskHead
+        AutodeskHead       = $AutodeskHead
+        Action1VersionBody = New-Action1FusionVersionBody -BuildVersion $BuildVersion -DetectedDate $DetectedDate -PayloadFileName $PayloadFileName
+    }
+}
+
 function Get-AutodeskInstallerHead {
     param([Parameter(Mandatory = $true)][string]$Url)
 
@@ -159,4 +184,4 @@ function Get-FusionBlockingProcesses {
     return $Processes | Where-Object { $names -contains $_.ProcessName }
 }
 
-Export-ModuleMember -Function ConvertTo-FusionVersionParts, Compare-FusionVersion, Read-FusionInfoFile, Get-HighestFusionInventoryVersion, New-HistoricalVersionWarning, New-Action1FusionVersionBody, Get-AutodeskInstallerHead, ConvertFrom-AutodeskInstallerHeadRecord, Get-LatestFusionStreamer, Get-FusionBlockingProcesses
+Export-ModuleMember -Function ConvertTo-FusionVersionParts, Compare-FusionVersion, Read-FusionInfoFile, Get-HighestFusionInventoryVersion, New-HistoricalVersionWarning, New-Action1FusionVersionBody, Test-AutodeskHeadChanged, New-FusionWatcherDryRunResult, Get-AutodeskInstallerHead, ConvertFrom-AutodeskInstallerHeadRecord, Get-LatestFusionStreamer, Get-FusionBlockingProcesses
