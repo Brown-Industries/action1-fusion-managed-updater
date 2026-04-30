@@ -113,6 +113,7 @@ Assert-ThrowsLike { Assert-FusionWatcherLiveBuildVersion -BuildVersion '' } '*FU
 Assert-ThrowsLike { Assert-FusionWatcherLiveBuildVersion -BuildVersion 'unknown-20260430120000' } '*FUSION_OBSERVED_BUILD_VERSION*' 'Fusion watcher live build guard rejects unknown build version'
 Assert-ThrowsLike { Assert-FusionWatcherLiveBuildVersion -BuildVersion 'latest' } '*numeric dotted Fusion build version*' 'Fusion watcher live build guard rejects non-version strings'
 Assert-ThrowsLike { Assert-FusionWatcherLiveBuildVersion -BuildVersion '2702.bad.99' } '*numeric dotted Fusion build version*' 'Fusion watcher live build guard rejects non-numeric version segments'
+Assert-ThrowsLike { Assert-FusionWatcherLiveBuildVersion -BuildVersion '2702' } '*numeric dotted Fusion build version*' 'Fusion watcher live build guard rejects single-segment versions'
 
 $stateTempRoot = Join-Path $env:TEMP ('fmu-state-test-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $stateTempRoot -Force | Out-Null
