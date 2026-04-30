@@ -115,8 +115,9 @@ $candidateProcesses = @(
     [pscustomobject]@{ ProcessName = 'notepad'; Id = 5 }
 )
 $blockingProcesses = @(Get-FusionBlockingProcesses -Processes $candidateProcesses)
-Assert-Equal $blockingProcesses.Count 3 'Fusion blocking process helper returns only real Fusion process names'
-Assert-True (($blockingProcesses.ProcessName -contains 'Fusion360') -and ($blockingProcesses.ProcessName -contains 'FusionLauncher') -and ($blockingProcesses.ProcessName -contains 'FusionService')) 'Fusion blocking process helper includes expected process names'
+Assert-Equal $blockingProcesses.Count 2 'Fusion blocking process helper returns only user-facing Fusion process names'
+Assert-True (($blockingProcesses.ProcessName -contains 'Fusion360') -and ($blockingProcesses.ProcessName -contains 'FusionLauncher')) 'Fusion blocking process helper includes expected process names'
+Assert-True ($blockingProcesses.ProcessName -notcontains 'FusionService') 'Fusion blocking process helper excludes service-like background process names'
 Assert-True ($blockingProcesses.ProcessName -notcontains 'Autodesk Fusion 360') 'Fusion blocking process helper excludes display names with spaces'
 
 $missingRoot = Join-Path $env:TEMP ('fmu-missing-' + [guid]::NewGuid().ToString('N'))
@@ -157,6 +158,49 @@ try {
     Assert-Equal $queryFiles.Count 2 'Fake streamer captured before and after query info files'
     foreach ($queryFile in $queryFiles) {
         Assert-True (-not (Test-Path -LiteralPath $queryFile)) "Endpoint updater removes temp query file $queryFile"
+    }
+}
+finally {
+    $env:FMU_TEST_MARKER = $previousMarker
+    Remove-Item -LiteralPath $tempRoot -Recurse -Force
+}
+
+$tempRoot = Join-Path $env:TEMP ('fmu-test-' + [guid]::NewGuid().ToString('N'))
+$webDeployRoot = Join-Path $tempRoot 'Autodesk\webdeploy'
+$fakeStreamer = Join-Path $tempRoot 'fake-streamer-success.ps1'
+$markerPath = Join-Path $tempRoot 'operations.txt'
+New-Item -ItemType Directory -Path $webDeployRoot -Force | Out-Null
+New-Item -ItemType File -Path $markerPath -Force | Out-Null
+Set-Content -LiteralPath $fakeStreamer -Encoding ASCII -Value @(
+    '$mode = $null',
+    '$info = $null',
+    'for ($i = 0; $i -lt $args.Count; $i++) {',
+    '    if ($args[$i] -eq ''--process'' -and ($i + 1) -lt $args.Count) { $mode = $args[$i + 1] }',
+    '    if ($args[$i] -eq ''--infofile'' -and ($i + 1) -lt $args.Count) { $info = $args[$i + 1] }',
+    '}',
+    'Add-Content -LiteralPath $env:FMU_TEST_MARKER -Value $mode',
+    'if ($mode -eq ''query'') {',
+    '    Add-Content -LiteralPath $env:FMU_TEST_MARKER -Value "info=$info"',
+    '    Set-Content -LiteralPath $info -Encoding ASCII -Value ''{"manifest":{"build-version":"2702.1.58","major-update-version":"","release-version":"test","streamer":{"feature-version":"test","release-id":"test"},"properties":{"display-name":"Autodesk Fusion"}},"install_path":"C:\\Fake","connection":"offline","stream":"test"}''',
+    '    exit 0',
+    '}',
+    'if ($mode -eq ''update'') { exit 0 }',
+    'exit 9'
+)
+
+$previousMarker = $env:FMU_TEST_MARKER
+$env:FMU_TEST_MARKER = $markerPath
+try {
+    $successResult = Invoke-EndpointScript -Arguments @('-WebDeployRoot', $webDeployRoot, '-StreamerPathOverride', $fakeStreamer)
+    Assert-Equal $successResult.ExitCode 0 'Endpoint updater exits 0 when post-update build version exists'
+
+    $operations = @(Get-Content -LiteralPath $markerPath | Where-Object { $_ -and ($_ -notlike 'info=*') })
+    Assert-Equal ($operations -join ',') 'query,update,query' 'Endpoint updater runs query-update-query on success path'
+
+    $queryFiles = @(Get-Content -LiteralPath $markerPath | Where-Object { $_ -like 'info=*' } | ForEach-Object { $_.Substring(5) })
+    Assert-Equal $queryFiles.Count 2 'Success fake streamer captured before and after query info files'
+    foreach ($queryFile in $queryFiles) {
+        Assert-True (-not (Test-Path -LiteralPath $queryFile)) "Endpoint updater removes success temp query file $queryFile"
     }
 }
 finally {

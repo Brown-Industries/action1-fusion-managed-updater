@@ -130,7 +130,7 @@ function Get-FusionBlockingProcesses {
     if ($null -eq $Processes) {
         $Processes = Get-Process -ErrorAction SilentlyContinue
     }
-    $names = @('Fusion360', 'FusionLauncher', 'FusionService')
+    $names = @('Fusion360', 'FusionLauncher')
     return $Processes | Where-Object { $names -contains $_.ProcessName }
 }
 
