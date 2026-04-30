@@ -95,6 +95,14 @@ $warning = New-HistoricalVersionWarning -BuildVersion '2702.1.58' -DetectedDate 
 Assert-True ($warning -like '*historical build*') 'Warning says historical builds are not pinned installers'
 Assert-True ($warning -like '*currently available Fusion build*') 'Warning says Autodesk controls currently available build'
 
+$versionDescription = New-HistoricalVersionWarning -BuildVersion '2702.1.58' -DetectedDate '2026-04-30'
+$versionBody = New-Action1FusionVersionBody -BuildVersion '2702.1.58' -DetectedDate '2026-04-30' -PayloadFileName 'FusionManagedUpdater.cmd'
+Assert-Equal $versionBody.version '2702.1.58' 'Action1 version body uses Fusion build version'
+Assert-Equal $versionBody.app_name_match '^Autodesk Fusion(?: 360)?$' 'Action1 version body matches current and legacy Fusion names'
+Assert-True ($versionBody.description -eq $versionDescription) 'Action1 version body includes historical warning'
+Assert-Equal $versionBody.silent_install_switches '' 'Action1 payload launcher needs no switches'
+Assert-Equal $versionBody.success_exit_codes '0' 'Action1 success exit code is zero'
+
 $payloadTempRoot = Join-Path $env:TEMP ('fmu-payload-test-' + [guid]::NewGuid().ToString('N'))
 $payloadOutput = Join-Path $payloadTempRoot 'FusionManagedUpdater.cmd'
 try {

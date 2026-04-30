@@ -82,6 +82,31 @@ function New-HistoricalVersionWarning {
     return "This version records Autodesk Fusion build $BuildVersion as detected on $DetectedDate. Fusion is delivered by Autodesk's live streamer endpoint. Deploying this or any older version will update the endpoint to Autodesk's currently available Fusion build, not necessarily this historical build. Only the latest Autodesk-served Fusion build is installable through this package."
 }
 
+function New-Action1FusionVersionBody {
+    param(
+        [Parameter(Mandatory = $true)][string]$BuildVersion,
+        [Parameter(Mandatory = $true)][string]$DetectedDate,
+        [Parameter(Mandatory = $true)][string]$PayloadFileName
+    )
+
+    $description = New-HistoricalVersionWarning -BuildVersion $BuildVersion -DetectedDate $DetectedDate
+    [ordered]@{
+        version                 = $BuildVersion
+        app_name_match          = '^Autodesk Fusion(?: 360)?$'
+        description             = $description
+        internal_notes          = $description
+        release_date            = $DetectedDate
+        security_severity       = 'Unspecified'
+        silent_install_switches = ''
+        success_exit_codes      = '0'
+        reboot_exit_codes       = ''
+        install_type            = 'exe'
+        update_type             = 'Regular Updates'
+        os                      = @('Windows 10', 'Windows 11')
+        file_name               = @{ Windows_64 = @{ name = $PayloadFileName; type = 'cloud' } }
+    }
+}
+
 function Get-AutodeskInstallerHead {
     param([Parameter(Mandatory = $true)][string]$Url)
 
@@ -134,4 +159,4 @@ function Get-FusionBlockingProcesses {
     return $Processes | Where-Object { $names -contains $_.ProcessName }
 }
 
-Export-ModuleMember -Function ConvertTo-FusionVersionParts, Compare-FusionVersion, Read-FusionInfoFile, Get-HighestFusionInventoryVersion, New-HistoricalVersionWarning, Get-AutodeskInstallerHead, ConvertFrom-AutodeskInstallerHeadRecord, Get-LatestFusionStreamer, Get-FusionBlockingProcesses
+Export-ModuleMember -Function ConvertTo-FusionVersionParts, Compare-FusionVersion, Read-FusionInfoFile, Get-HighestFusionInventoryVersion, New-HistoricalVersionWarning, New-Action1FusionVersionBody, Get-AutodeskInstallerHead, ConvertFrom-AutodeskInstallerHeadRecord, Get-LatestFusionStreamer, Get-FusionBlockingProcesses
