@@ -54,4 +54,9 @@ $cmd.Add('rmdir /s /q "%work%" >nul 2>nul')
 $cmd.Add('exit /b %code%')
 
 Set-Content -LiteralPath $OutputPath -Value $cmd -Encoding ASCII
-Write-Host "Wrote Action1 payload: $OutputPath"
+$payloadSize = (Get-Item -LiteralPath $OutputPath).Length
+if ($payloadSize -ge 1MB) {
+    throw "Action1 payload is $payloadSize bytes, which must be under 1048576 bytes: $OutputPath"
+}
+
+Write-Host "Wrote Action1 payload: $OutputPath ($payloadSize bytes)"

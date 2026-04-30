@@ -4,6 +4,7 @@ Import-Module $modulePath -Force
 
 $fixtureRoot = Join-Path $PSScriptRoot 'fixtures'
 $endpointScript = Join-Path $repoRoot 'src/Invoke-FusionManagedUpdate.ps1'
+$payloadBuilder = Join-Path $repoRoot 'packaging/build-action1-payload.ps1'
 
 function Assert-ThrowsLike {
     param(
@@ -28,6 +29,23 @@ function Invoke-EndpointScript {
     $ErrorActionPreference = 'Continue'
     try {
         $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $endpointScript @Arguments 2>&1
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    [pscustomobject]@{
+        ExitCode = $LASTEXITCODE
+        Output   = ($output | Out-String)
+    }
+}
+
+function Invoke-PayloadBuilder {
+    param([Parameter(Mandatory = $true)][string]$OutputPath)
+
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $payloadBuilder -OutputPath $OutputPath 2>&1
     }
     finally {
         $ErrorActionPreference = $previousErrorActionPreference
@@ -76,6 +94,32 @@ Assert-Equal $autodeskHead.ContentLength '1486420912' 'Autodesk HEAD parser retu
 $warning = New-HistoricalVersionWarning -BuildVersion '2702.1.58' -DetectedDate '2026-04-30'
 Assert-True ($warning -like '*historical build*') 'Warning says historical builds are not pinned installers'
 Assert-True ($warning -like '*currently available Fusion build*') 'Warning says Autodesk controls currently available build'
+
+$payloadTempRoot = Join-Path $env:TEMP ('fmu-payload-test-' + [guid]::NewGuid().ToString('N'))
+$payloadOutput = Join-Path $payloadTempRoot 'FusionManagedUpdater.cmd'
+try {
+    $payloadResult = Invoke-PayloadBuilder -OutputPath $payloadOutput
+    Assert-Equal $payloadResult.ExitCode 0 'Action1 payload builder exits 0'
+    Assert-True (Test-Path -LiteralPath $payloadOutput) 'Action1 payload builder writes requested output path'
+
+    $payloadBytes = [IO.File]::ReadAllBytes($payloadOutput)
+    $nonAsciiByte = $payloadBytes | Where-Object { $_ -gt 127 } | Select-Object -First 1
+    Assert-True ($null -eq $nonAsciiByte) 'Action1 payload is ASCII-only'
+    Assert-True ($payloadBytes.Length -lt 1MB) 'Action1 payload is under 1 MB'
+
+    $payloadText = Get-Content -LiteralPath $payloadOutput -Raw
+    Assert-True ($payloadText -like '*set "moduleb64=%work%\module.b64"*') 'Action1 payload defines module base64 path'
+    Assert-True ($payloadText -like '*set "scriptb64=%work%\script.b64"*') 'Action1 payload defines script base64 path'
+    Assert-True ($payloadText.Contains('[Convert]::FromBase64String')) 'Action1 payload decodes embedded files'
+    Assert-True ($payloadText -like '*powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ps1%"*') 'Action1 payload runs extracted endpoint script'
+    Assert-True ($payloadText -like '*exit /b %code%*') 'Action1 payload exits with endpoint exit code'
+    Assert-True ($payloadResult.Output -like '*bytes*') 'Action1 payload builder reports payload size'
+}
+finally {
+    if (Test-Path -LiteralPath $payloadTempRoot) {
+        Remove-Item -LiteralPath $payloadTempRoot -Recurse -Force
+    }
+}
 
 $tempRoot = Join-Path $env:TEMP ('fmu-test-' + [guid]::NewGuid().ToString('N'))
 $streamerDir = Join-Path $tempRoot 'Autodesk\webdeploy\meta\streamer\20260227094542'
