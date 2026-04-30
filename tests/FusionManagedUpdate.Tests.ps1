@@ -22,6 +22,23 @@ $inventory = Get-Content -LiteralPath (Join-Path $fixtureRoot 'action1-installed
 $highest = Get-HighestFusionInventoryVersion -Inventory $inventory
 Assert-Equal $highest '2702.1.58' 'Highest Action1 Fusion inventory version is detected'
 
+$inventoryWithInvalidVersion = [pscustomobject]@{
+    items = @(
+        [pscustomobject]@{ fields = [pscustomobject]@{ Name = 'Autodesk Fusion'; Version = '2702.bad.99' } },
+        [pscustomobject]@{ fields = [pscustomobject]@{ Name = 'Autodesk Fusion'; Version = '2702.1.47' } },
+        [pscustomobject]@{ fields = [pscustomobject]@{ Name = 'Autodesk Fusion 360'; Version = '2702.1.58' } }
+    )
+}
+$highestValid = Get-HighestFusionInventoryVersion -Inventory $inventoryWithInvalidVersion
+Assert-Equal $highestValid '2702.1.58' 'Highest Action1 Fusion inventory version skips invalid versions'
+
+$autodeskHeadFixture = Get-Content -LiteralPath (Join-Path $fixtureRoot 'autodesk-head-current.json') -Raw | ConvertFrom-Json
+$autodeskHead = ConvertFrom-AutodeskInstallerHeadRecord -Record $autodeskHeadFixture
+Assert-Equal $autodeskHead.Url 'https://dl.appstreaming.autodesk.com/production/installers/Fusion%20Admin%20Install.exe' 'Autodesk HEAD parser returns URL'
+Assert-Equal $autodeskHead.LastModified 'Thu, 23 Apr 2026 03:21:46 GMT' 'Autodesk HEAD parser returns Last-Modified'
+Assert-Equal $autodeskHead.ETag '"945f8d5c5e70f2a1ffa5f7e666a72247:1776914468.464812"' 'Autodesk HEAD parser returns ETag'
+Assert-Equal $autodeskHead.ContentLength '1486420912' 'Autodesk HEAD parser returns Content-Length'
+
 $warning = New-HistoricalVersionWarning -BuildVersion '2702.1.58' -DetectedDate '2026-04-30'
 Assert-True ($warning -like '*historical build*') 'Warning says historical builds are not pinned installers'
 Assert-True ($warning -like '*currently available Fusion build*') 'Warning says Autodesk controls currently available build'

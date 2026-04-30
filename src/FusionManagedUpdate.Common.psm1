@@ -54,19 +54,20 @@ function Read-FusionInfoFile {
 function Get-HighestFusionInventoryVersion {
     param([Parameter(Mandatory = $true)]$Inventory)
 
-    $versions = @()
+    $highest = $null
     foreach ($item in $Inventory.items) {
         $name = [string]$item.fields.Name
         $version = [string]$item.fields.Version
         if ($name -match '^Autodesk Fusion(?: 360)?$' -and $version) {
-            $versions += $version
-        }
-    }
-    if ($versions.Count -eq 0) { return $null }
-    $highest = $versions[0]
-    foreach ($version in $versions) {
-        if ((Compare-FusionVersion -Left $version -Right $highest) -gt 0) {
-            $highest = $version
+            try {
+                [void](ConvertTo-FusionVersionParts -Version $version)
+                if ($null -eq $highest -or (Compare-FusionVersion -Left $version -Right $highest) -gt 0) {
+                    $highest = $version
+                }
+            }
+            catch {
+                continue
+            }
         }
     }
     return $highest
@@ -85,12 +86,23 @@ function Get-AutodeskInstallerHead {
     param([Parameter(Mandatory = $true)][string]$Url)
 
     $response = Invoke-WebRequest -Uri $Url -Method Head -MaximumRedirection 5 -UseBasicParsing -TimeoutSec 60
-    [pscustomobject]@{
+    ConvertFrom-AutodeskInstallerHeadRecord -Record ([pscustomobject]@{
         Url           = $Url
         LastModified  = ($response.Headers['Last-Modified'] -join ',')
         ETag          = ($response.Headers['ETag'] -join ',')
         ContentLength = ($response.Headers['Content-Length'] -join ',')
+    })
+}
+
+function ConvertFrom-AutodeskInstallerHeadRecord {
+    param([Parameter(Mandatory = $true)]$Record)
+
+    [pscustomobject]@{
+        Url           = [string]$Record.Url
+        LastModified  = [string]$Record.LastModified
+        ETag          = [string]$Record.ETag
+        ContentLength = [string]$Record.ContentLength
     }
 }
 
-Export-ModuleMember -Function ConvertTo-FusionVersionParts, Compare-FusionVersion, Read-FusionInfoFile, Get-HighestFusionInventoryVersion, New-HistoricalVersionWarning, Get-AutodeskInstallerHead
+Export-ModuleMember -Function ConvertTo-FusionVersionParts, Compare-FusionVersion, Read-FusionInfoFile, Get-HighestFusionInventoryVersion, New-HistoricalVersionWarning, Get-AutodeskInstallerHead, ConvertFrom-AutodeskInstallerHeadRecord
