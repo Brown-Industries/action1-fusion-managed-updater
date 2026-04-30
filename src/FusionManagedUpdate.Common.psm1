@@ -138,6 +138,12 @@ function Assert-FusionWatcherLiveBuildVersion {
     if ([string]::IsNullOrWhiteSpace($BuildVersion) -or $BuildVersion -like 'unknown-*') {
         throw 'FUSION_OBSERVED_BUILD_VERSION must be set to a real observed Fusion build version for live Action1 version creation.'
     }
+    try {
+        [void](ConvertTo-FusionVersionParts -Version $BuildVersion)
+    }
+    catch {
+        throw 'FUSION_OBSERVED_BUILD_VERSION must be a numeric dotted Fusion build version for live Action1 version creation.'
+    }
     return $BuildVersion
 }
 

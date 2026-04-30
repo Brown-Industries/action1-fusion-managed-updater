@@ -49,7 +49,7 @@ function Invoke-Action1Api {
 $state = Read-State -Path $StatePath
 $head = Get-AutodeskInstallerHead -Url $AutodeskInstallerUrl
 $detectedDate = (Get-Date).ToString('yyyy-MM-dd')
-$buildVersion = if ($env:FUSION_OBSERVED_BUILD_VERSION) { $env:FUSION_OBSERVED_BUILD_VERSION } else { 'unknown-' + (Get-Date).ToString('yyyyMMddHHmmss') }
+$buildVersion = if ($env:FUSION_OBSERVED_BUILD_VERSION) { $env:FUSION_OBSERVED_BUILD_VERSION } else { 'unknown-dry-run' }
 $dryRunResult = New-FusionWatcherDryRunResult -State $state -AutodeskHead $head -BuildVersion $buildVersion -DetectedDate $detectedDate -PayloadFileName 'FusionManagedUpdater.cmd'
 $changed = $dryRunResult.Changed
 $body = $dryRunResult.Action1VersionBody
