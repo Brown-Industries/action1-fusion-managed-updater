@@ -108,6 +108,24 @@ Assert-Equal $unchangedDryRun.Changed $false 'Fusion watcher dry-run result repo
 Assert-Equal $unchangedDryRun.AutodeskHead.ETag $autodeskHead.ETag 'Fusion watcher dry-run result includes Autodesk HEAD when unchanged'
 Assert-Equal $unchangedDryRun.Action1VersionBody.version '2702.1.58' 'Fusion watcher dry-run result includes Action1 version body when unchanged'
 
+Assert-Equal (Assert-FusionWatcherLiveBuildVersion -BuildVersion '2702.1.58') '2702.1.58' 'Fusion watcher live build guard accepts observed build version'
+Assert-ThrowsLike { Assert-FusionWatcherLiveBuildVersion -BuildVersion '' } '*FUSION_OBSERVED_BUILD_VERSION*' 'Fusion watcher live build guard rejects missing build version'
+Assert-ThrowsLike { Assert-FusionWatcherLiveBuildVersion -BuildVersion 'unknown-20260430120000' } '*FUSION_OBSERVED_BUILD_VERSION*' 'Fusion watcher live build guard rejects unknown build version'
+
+$stateTempRoot = Join-Path $env:TEMP ('fmu-state-test-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $stateTempRoot -Force | Out-Null
+Push-Location $stateTempRoot
+try {
+    Write-FusionWatcherState -Path 'fusion-release-state.json' -State $autodeskHead
+    Assert-True (Test-Path -LiteralPath 'fusion-release-state.json') 'Fusion watcher state writer supports bare filenames'
+    $writtenState = Get-Content -LiteralPath 'fusion-release-state.json' -Raw | ConvertFrom-Json
+    Assert-Equal $writtenState.ETag $autodeskHead.ETag 'Fusion watcher state writer preserves state payload'
+}
+finally {
+    Pop-Location
+    Remove-Item -LiteralPath $stateTempRoot -Recurse -Force
+}
+
 $payloadTempRoot = Join-Path $env:TEMP ('fmu-payload-test-' + [guid]::NewGuid().ToString('N'))
 $payloadOutput = Join-Path $payloadTempRoot 'FusionManagedUpdater.cmd'
 try {

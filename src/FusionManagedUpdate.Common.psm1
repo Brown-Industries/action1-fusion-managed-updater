@@ -132,6 +132,28 @@ function New-FusionWatcherDryRunResult {
     }
 }
 
+function Assert-FusionWatcherLiveBuildVersion {
+    param([string]$BuildVersion)
+
+    if ([string]::IsNullOrWhiteSpace($BuildVersion) -or $BuildVersion -like 'unknown-*') {
+        throw 'FUSION_OBSERVED_BUILD_VERSION must be set to a real observed Fusion build version for live Action1 version creation.'
+    }
+    return $BuildVersion
+}
+
+function Write-FusionWatcherState {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)]$State
+    )
+
+    $dir = Split-Path -Parent $Path
+    if ($dir -and -not (Test-Path -LiteralPath $dir)) {
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
+    $State | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $Path -Encoding UTF8
+}
+
 function Get-AutodeskInstallerHead {
     param([Parameter(Mandatory = $true)][string]$Url)
 
@@ -184,4 +206,4 @@ function Get-FusionBlockingProcesses {
     return $Processes | Where-Object { $names -contains $_.ProcessName }
 }
 
-Export-ModuleMember -Function ConvertTo-FusionVersionParts, Compare-FusionVersion, Read-FusionInfoFile, Get-HighestFusionInventoryVersion, New-HistoricalVersionWarning, New-Action1FusionVersionBody, Test-AutodeskHeadChanged, New-FusionWatcherDryRunResult, Get-AutodeskInstallerHead, ConvertFrom-AutodeskInstallerHeadRecord, Get-LatestFusionStreamer, Get-FusionBlockingProcesses
+Export-ModuleMember -Function ConvertTo-FusionVersionParts, Compare-FusionVersion, Read-FusionInfoFile, Get-HighestFusionInventoryVersion, New-HistoricalVersionWarning, New-Action1FusionVersionBody, Test-AutodeskHeadChanged, New-FusionWatcherDryRunResult, Assert-FusionWatcherLiveBuildVersion, Write-FusionWatcherState, Get-AutodeskInstallerHead, ConvertFrom-AutodeskInstallerHeadRecord, Get-LatestFusionStreamer, Get-FusionBlockingProcesses

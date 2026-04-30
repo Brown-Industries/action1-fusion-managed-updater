@@ -24,11 +24,7 @@ function Read-State {
 
 function Write-State {
     param([string]$Path, $State)
-    $dir = Split-Path -Parent $Path
-    if (-not (Test-Path -LiteralPath $dir)) {
-        New-Item -ItemType Directory -Path $dir -Force | Out-Null
-    }
-    $State | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $Path -Encoding UTF8
+    Write-FusionWatcherState -Path $Path -State $State
 }
 
 function Invoke-Action1Api {
@@ -67,6 +63,8 @@ if (-not $changed) {
     Write-Host 'No Autodesk installer release signal changed.'
     exit 0
 }
+
+[void](Assert-FusionWatcherLiveBuildVersion -BuildVersion $buildVersion)
 
 if (-not $PackageId) {
     throw 'ACTION1_FUSION_PACKAGE_ID or -PackageId is required for live version creation.'
