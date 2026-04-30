@@ -105,4 +105,23 @@ function ConvertFrom-AutodeskInstallerHeadRecord {
     }
 }
 
-Export-ModuleMember -Function ConvertTo-FusionVersionParts, Compare-FusionVersion, Read-FusionInfoFile, Get-HighestFusionInventoryVersion, New-HistoricalVersionWarning, Get-AutodeskInstallerHead, ConvertFrom-AutodeskInstallerHeadRecord
+function Get-LatestFusionStreamer {
+    param([Parameter(Mandatory = $true)][string]$WebDeployRoot)
+    $streamerRoot = Join-Path $WebDeployRoot 'meta\streamer'
+    if (-not (Test-Path -LiteralPath $streamerRoot)) {
+        throw "Fusion streamer directory was not found: $streamerRoot"
+    }
+    $candidate = Get-ChildItem -LiteralPath $streamerRoot -Directory |
+        Sort-Object Name -Descending |
+        ForEach-Object {
+            $exe = Join-Path $_.FullName 'streamer.exe'
+            if (Test-Path -LiteralPath $exe) { $exe }
+        } |
+        Select-Object -First 1
+    if (-not $candidate) {
+        throw "No streamer.exe was found under: $streamerRoot"
+    }
+    return $candidate
+}
+
+Export-ModuleMember -Function ConvertTo-FusionVersionParts, Compare-FusionVersion, Read-FusionInfoFile, Get-HighestFusionInventoryVersion, New-HistoricalVersionWarning, Get-AutodeskInstallerHead, ConvertFrom-AutodeskInstallerHeadRecord, Get-LatestFusionStreamer

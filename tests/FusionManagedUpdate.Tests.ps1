@@ -42,3 +42,13 @@ Assert-Equal $autodeskHead.ContentLength '1486420912' 'Autodesk HEAD parser retu
 $warning = New-HistoricalVersionWarning -BuildVersion '2702.1.58' -DetectedDate '2026-04-30'
 Assert-True ($warning -like '*historical build*') 'Warning says historical builds are not pinned installers'
 Assert-True ($warning -like '*currently available Fusion build*') 'Warning says Autodesk controls currently available build'
+
+$tempRoot = Join-Path $env:TEMP ('fmu-test-' + [guid]::NewGuid().ToString('N'))
+$streamerDir = Join-Path $tempRoot 'Autodesk\webdeploy\meta\streamer\20260227094542'
+New-Item -ItemType Directory -Path $streamerDir -Force | Out-Null
+New-Item -ItemType File -Path (Join-Path $streamerDir 'streamer.exe') -Force | Out-Null
+
+$foundStreamer = Get-LatestFusionStreamer -WebDeployRoot (Join-Path $tempRoot 'Autodesk\webdeploy')
+Assert-True ($foundStreamer -like '*streamer.exe') 'Latest streamer path is detected'
+
+Remove-Item -LiteralPath $tempRoot -Recurse -Force
