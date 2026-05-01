@@ -101,6 +101,7 @@ Publishing events:
 - Pushes to the repository default branch publish `latest`, branch, and `sha-*` tags.
 - `v*` tag pushes publish the matching version tag and `sha-*` tag.
 - Manual workflow runs publish only when run from the default branch or a `v*` tag; other refs build only.
+- If Docker Hub secrets are missing, eligible publish runs build the image and emit a warning instead of pushing.
 
 Required GitHub repository secrets:
 
