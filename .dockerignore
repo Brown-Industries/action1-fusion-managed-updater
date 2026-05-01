@@ -1,0 +1,5 @@
+.git
+.worktrees
+dist/*.cmd
+state
+*.log

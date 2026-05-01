@@ -1,0 +1,10 @@
+services:
+  fusion-action1-updater:
+    build: .
+    environment:
+      ACTION1_CLIENT_ID: "${ACTION1_CLIENT_ID}"
+      ACTION1_CLIENT_SECRET: "${ACTION1_CLIENT_SECRET}"
+      PACKAGE_NAME: "Autodesk Fusion Managed Updater"
+      ACTION1_ORG_ID: "all"
+      ONE_SHOT: "true"
+      CHECK_FREQUENCY_MINUTES: "1440"
