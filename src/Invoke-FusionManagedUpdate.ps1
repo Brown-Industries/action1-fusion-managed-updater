@@ -134,7 +134,7 @@ function Invoke-FusionAdminBootstrapInstall {
     try {
         $installerPath = Save-FusionAdminInstaller -Source $InstallerSource -WorkRoot $WorkRoot
         Write-Step -Name 'bootstrap_install_start' -Message "installer=$installerPath"
-        & $installerPath --quiet
+        & $installerPath --globalinstall --quiet
         $installerExitCode = $LASTEXITCODE
         if ($null -ne $installerExitCode -and $installerExitCode -ne 0) {
             throw "Fusion admin bootstrap installer failed with exit code $installerExitCode."

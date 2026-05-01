@@ -911,7 +911,7 @@ try {
     Assert-True ($bootstrapResult.Output -like '*FMU_STEP verification_success*') 'Endpoint updater reports verification success to Action1 output'
 
     $bootstrapOperations = @(Get-Content -LiteralPath $markerPath | Where-Object { $_ })
-    Assert-True ($bootstrapOperations -contains 'installer_args=--quiet') 'Bootstrap installer is run with quiet switch'
+    Assert-True ($bootstrapOperations -contains 'installer_args=--globalinstall,--quiet') 'Bootstrap installer is run with global all-users quiet switches'
     Assert-True ($bootstrapOperations -contains 'query') 'Endpoint updater queries Fusion after bootstrap install'
     Assert-True (Test-Path -LiteralPath $logPath) 'Endpoint updater writes durable status log'
     if (Test-Path -LiteralPath $logPath) {
