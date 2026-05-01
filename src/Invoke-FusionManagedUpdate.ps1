@@ -173,8 +173,31 @@ try {
     $installerRoot = if (-not [string]::IsNullOrWhiteSpace($InstallerWorkRoot)) { $InstallerWorkRoot } else { $env:TEMP }
     Write-Step -Name 'start' -Message "webDeployRoot=$WebDeployRoot logPath=$script:LogPath"
 
+    $streamer = ''
+    $bootstrapReason = ''
     if (-not (Test-Path -LiteralPath $WebDeployRoot)) {
-        Write-Step -Name 'bootstrap_required' -Message "webDeployRoot=$WebDeployRoot"
+        $bootstrapReason = "missingWebDeployRoot=$WebDeployRoot"
+    }
+    else {
+        $streamerRoot = Join-Path $WebDeployRoot 'meta\streamer'
+        if (-not (Test-Path -LiteralPath $streamerRoot)) {
+            $bootstrapReason = "missingStreamerRoot=$streamerRoot"
+        }
+        elseif ($StreamerPathOverride) {
+            $streamer = $StreamerPathOverride
+        }
+        else {
+            try {
+                $streamer = Get-LatestFusionStreamer -WebDeployRoot $WebDeployRoot
+            }
+            catch {
+                $bootstrapReason = "streamerLookupFailed=$($_.Exception.Message)"
+            }
+        }
+    }
+
+    if ($bootstrapReason) {
+        Write-Step -Name 'bootstrap_required' -Message $bootstrapReason
         Invoke-FusionAdminBootstrapInstall -InstallerSource $AdminInstallerUrl -WorkRoot $installerRoot
         if (-not (Test-Path -LiteralPath $WebDeployRoot)) {
             throw "Fusion admin bootstrap completed, but all-users Fusion webdeploy root was still not found: $WebDeployRoot."
@@ -192,7 +215,6 @@ try {
         exit 0
     }
 
-    $streamer = if ($StreamerPathOverride) { $StreamerPathOverride } else { Get-LatestFusionStreamer -WebDeployRoot $WebDeployRoot }
     Write-Info "Using streamer: $streamer"
     Write-Info 'Autodesk controls the actual streamed target. Historical Action1 versions are release records, not rollback installers.'
 

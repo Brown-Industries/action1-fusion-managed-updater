@@ -927,11 +927,59 @@ finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force
 }
 
+$tempRoot = Join-Path $env:TEMP ('fmu-partial-bootstrap-test-' + [guid]::NewGuid().ToString('N'))
+$webDeployRoot = Join-Path $tempRoot 'Autodesk\webdeploy'
+$fakeInstaller = Join-Path $tempRoot 'fake-admin-install.ps1'
+$fakeStreamer = Join-Path $tempRoot 'fake-streamer-partial-bootstrap.ps1'
+$markerPath = Join-Path $tempRoot 'partial-bootstrap-operations.txt'
+$logPath = Join-Path $tempRoot 'FusionManagedUpdater.log'
+New-Item -ItemType Directory -Path $webDeployRoot -Force | Out-Null
+New-Item -ItemType File -Path $markerPath -Force | Out-Null
+Set-Content -LiteralPath $fakeInstaller -Encoding ASCII -Value @(
+    'Add-Content -LiteralPath $env:FMU_TEST_MARKER -Value ("installer_args=" + ($args -join ","))',
+    '$streamerDir = Join-Path $env:FMU_TEST_WEBDEPLOY_ROOT ''meta\streamer\20260501000000''',
+    'New-Item -ItemType Directory -Path $streamerDir -Force | Out-Null',
+    'exit 0'
+)
+Set-Content -LiteralPath $fakeStreamer -Encoding ASCII -Value @(
+    '$mode = $null',
+    '$info = $null',
+    'for ($i = 0; $i -lt $args.Count; $i++) {',
+    '    if ($args[$i] -eq ''--process'' -and ($i + 1) -lt $args.Count) { $mode = $args[$i + 1] }',
+    '    if ($args[$i] -eq ''--infofile'' -and ($i + 1) -lt $args.Count) { $info = $args[$i + 1] }',
+    '}',
+    'Add-Content -LiteralPath $env:FMU_TEST_MARKER -Value $mode',
+    'if ($mode -eq ''query'') {',
+    '    Set-Content -LiteralPath $info -Encoding ASCII -Value ''{"manifest":{"build-version":"2702.1.58","major-update-version":"","release-version":"test","streamer":{"feature-version":"test","release-id":"test"},"properties":{"display-name":"Autodesk Fusion"}},"install_path":"C:\\Fake","connection":"offline","stream":"test"}''',
+    '    exit 0',
+    '}',
+    'if ($mode -eq ''update'') { exit 0 }',
+    'exit 9'
+)
+
+$previousMarker = $env:FMU_TEST_MARKER
+$previousWebDeployRoot = $env:FMU_TEST_WEBDEPLOY_ROOT
+$env:FMU_TEST_MARKER = $markerPath
+$env:FMU_TEST_WEBDEPLOY_ROOT = $webDeployRoot
+try {
+    $partialBootstrapResult = Invoke-EndpointScript -Arguments @('-WebDeployRoot', $webDeployRoot, '-AdminInstallerUrl', $fakeInstaller, '-InstallerWorkRoot', $tempRoot, '-StreamerPathOverride', $fakeStreamer, '-LogPath', $logPath)
+    Assert-Equal $partialBootstrapResult.ExitCode 0 'Endpoint updater exits 0 after bootstrapping partial all-users Fusion root'
+
+    $partialBootstrapOperations = @(Get-Content -LiteralPath $markerPath | Where-Object { $_ })
+    Assert-True ($partialBootstrapOperations -contains 'installer_args=--globalinstall,--quiet') 'Endpoint updater bootstraps when webdeploy root exists without streamer metadata'
+    Assert-True ($partialBootstrapOperations -contains 'query') 'Endpoint updater queries Fusion after partial-root bootstrap'
+}
+finally {
+    $env:FMU_TEST_MARKER = $previousMarker
+    $env:FMU_TEST_WEBDEPLOY_ROOT = $previousWebDeployRoot
+    Remove-Item -LiteralPath $tempRoot -Recurse -Force
+}
+
 $tempRoot = Join-Path $env:TEMP ('fmu-test-' + [guid]::NewGuid().ToString('N'))
 $webDeployRoot = Join-Path $tempRoot 'Autodesk\webdeploy'
 $fakeStreamer = Join-Path $tempRoot 'fake-streamer.ps1'
 $markerPath = Join-Path $tempRoot 'infofiles.txt'
-New-Item -ItemType Directory -Path $webDeployRoot -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $webDeployRoot 'meta\streamer') -Force | Out-Null
 New-Item -ItemType File -Path $markerPath -Force | Out-Null
 Set-Content -LiteralPath $fakeStreamer -Encoding ASCII -Value @(
     '$mode = $null',
@@ -971,7 +1019,7 @@ $tempRoot = Join-Path $env:TEMP ('fmu-test-' + [guid]::NewGuid().ToString('N'))
 $webDeployRoot = Join-Path $tempRoot 'Autodesk\webdeploy'
 $fakeStreamer = Join-Path $tempRoot 'fake-streamer-success.ps1'
 $markerPath = Join-Path $tempRoot 'operations.txt'
-New-Item -ItemType Directory -Path $webDeployRoot -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $webDeployRoot 'meta\streamer') -Force | Out-Null
 New-Item -ItemType File -Path $markerPath -Force | Out-Null
 Set-Content -LiteralPath $fakeStreamer -Encoding ASCII -Value @(
     '$mode = $null',
