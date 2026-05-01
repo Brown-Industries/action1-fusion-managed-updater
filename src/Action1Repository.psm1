@@ -1,3 +1,6 @@
+$commonModulePath = Join-Path $PSScriptRoot 'FusionManagedUpdate.Common.psm1'
+Import-Module $commonModulePath -Force -Global
+
 function ConvertTo-Action1FormValue {
     param([string]$Value)
     return [uri]::EscapeDataString($Value).Replace('%20', '+')
@@ -63,4 +66,39 @@ function Invoke-Action1JsonApi {
     return Invoke-RestMethod -Method $Method -Uri $uri -Headers $headers
 }
 
-Export-ModuleMember -Function New-Action1TokenRequestBody, Select-Action1PackageByExactName, Get-Action1AccessToken, Invoke-Action1JsonApi
+function Invoke-Action1RequestCommand {
+    param(
+        [scriptblock]$RequestCommand,
+        [Parameter(Mandatory = $true)][string]$Method,
+        [Parameter(Mandatory = $true)][string]$Path,
+        [object]$Body = $null,
+        [string]$BaseUrl = '',
+        [string]$AccessToken = ''
+    )
+
+    if ($RequestCommand) {
+        return & $RequestCommand $Method $Path $Body
+    }
+    return Invoke-Action1JsonApi -Method $Method -BaseUrl $BaseUrl -AccessToken $AccessToken -Path $Path -Body $Body
+}
+
+function Ensure-Action1PackageByName {
+    param(
+        [Parameter(Mandatory = $true)][string]$BaseUrl,
+        [Parameter(Mandatory = $true)][string]$OrgId,
+        [Parameter(Mandatory = $true)][string]$AccessToken,
+        [Parameter(Mandatory = $true)][string]$PackageName,
+        [scriptblock]$RequestCommand = $null
+    )
+
+    $filter = [uri]::EscapeDataString($PackageName)
+    $packages = Invoke-Action1RequestCommand -RequestCommand $RequestCommand -Method 'GET' -Path "/software-repository/$OrgId`?custom=yes&filter=$filter&fields=*&limit=100" -BaseUrl $BaseUrl -AccessToken $AccessToken
+    $existing = Select-Action1PackageByExactName -Packages $packages -PackageName $PackageName
+    if ($null -ne $existing) {
+        return $existing
+    }
+
+    return Invoke-Action1RequestCommand -RequestCommand $RequestCommand -Method 'POST' -Path "/software-repository/$OrgId" -Body (New-Action1FusionPackageBody -PackageName $PackageName) -BaseUrl $BaseUrl -AccessToken $AccessToken
+}
+
+Export-ModuleMember -Function New-Action1TokenRequestBody, Select-Action1PackageByExactName, Get-Action1AccessToken, Invoke-Action1JsonApi, Ensure-Action1PackageByName

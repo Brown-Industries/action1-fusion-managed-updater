@@ -3,7 +3,7 @@ $modulePath = Join-Path $repoRoot 'src/FusionManagedUpdate.Common.psm1'
 Import-Module $modulePath -Force
 $action1ModulePath = Join-Path $repoRoot 'src/Action1Repository.psm1'
 if (Test-Path -LiteralPath $action1ModulePath) {
-    Import-Module $action1ModulePath -Force
+    Import-Module $action1ModulePath -Force -DisableNameChecking
 }
 
 $fixtureRoot = Join-Path $PSScriptRoot 'fixtures'
@@ -228,6 +228,28 @@ Assert-ThrowsLike {
     Select-Action1PackageByExactName -Packages $duplicatePackages -PackageName 'Autodesk Fusion Managed Updater'
 } '*Multiple Action1 packages*' 'Package selector rejects duplicate exact names'
 
+$existingPackageCalls = @()
+$existingPackage = Ensure-Action1PackageByName -BaseUrl 'https://action1.invalid/api/3.0' -OrgId 'all' -AccessToken 'token' -PackageName 'Autodesk Fusion Managed Updater' -RequestCommand {
+    param($Method, $Path, $Body)
+    $script:existingPackageCalls += "$Method $Path"
+    if ($Method -eq 'GET') {
+        return [pscustomobject]@{ items = @([pscustomobject]@{ id = 'pkg-1'; name = 'Autodesk Fusion Managed Updater' }) }
+    }
+    throw 'POST should not be called for existing package'
+}
+Assert-Equal $existingPackage.id 'pkg-1' 'Ensure package returns existing exact-name package'
+Assert-True (($existingPackageCalls -join ',') -like 'GET /software-repository/all*') 'Ensure package searches software repository'
+
+$createdPackageCalls = @()
+$createdPackage = Ensure-Action1PackageByName -BaseUrl 'https://action1.invalid/api/3.0' -OrgId 'all' -AccessToken 'token' -PackageName 'Autodesk Fusion Managed Updater' -RequestCommand {
+    param($Method, $Path, $Body)
+    $script:createdPackageCalls += "$Method $Path"
+    if ($Method -eq 'GET') { return [pscustomobject]@{ items = @() } }
+    if ($Method -eq 'POST') { return [pscustomobject]@{ id = 'pkg-new'; name = $Body.name } }
+}
+Assert-Equal $createdPackage.id 'pkg-new' 'Ensure package creates missing package'
+Assert-True (($createdPackageCalls -join ',') -like '*POST /software-repository/all*') 'Ensure package posts missing package'
+
 $packageBody = New-Action1FusionPackageBody -PackageName 'Autodesk Fusion Managed Updater'
 Assert-Equal $packageBody.name 'Autodesk Fusion Managed Updater' 'Package body uses requested package name'
 Assert-Equal $packageBody.vendor 'Autodesk' 'Package body uses Autodesk vendor'
@@ -268,6 +290,26 @@ $packageVersions = @(Get-Action1PackageVersionValues -Package $packageWithVersio
 Assert-Equal ($packageVersions -join ',') '2702.1.47,2702.1.58' 'Action1 package version helper reads version container'
 Assert-True (Test-Action1PackageHasVersion -Package $packageWithVersions -BuildVersion '2702.1.58') 'Action1 package version helper detects existing build version'
 Assert-True (-not (Test-Action1PackageHasVersion -Package $packageWithVersions -BuildVersion '2702.1.99')) 'Action1 package version helper reports missing build version'
+$packageWithBinary = [pscustomobject]@{
+    versions = @(
+        [pscustomobject]@{
+            id = 'version-1'
+            version = '2702.1.58'
+            binary_id = [pscustomobject]@{ Windows_64 = 'binary-1' }
+        }
+    )
+}
+$versionRecord = Get-Action1PackageVersionRecord -Package $packageWithBinary -BuildVersion '2702.1.58'
+Assert-Equal $versionRecord.id 'version-1' 'Version record helper returns matching version record'
+Assert-True (Test-Action1PackageVersionHasWindowsBinary -VersionRecord $versionRecord) 'Version binary helper detects Windows binary'
+
+$packageWithoutBinary = [pscustomobject]@{
+    versions = @(
+        [pscustomobject]@{ id = 'version-1'; version = '2702.1.58' }
+    )
+}
+$missingBinaryRecord = Get-Action1PackageVersionRecord -Package $packageWithoutBinary -BuildVersion '2702.1.58'
+Assert-True (-not (Test-Action1PackageVersionHasWindowsBinary -VersionRecord $missingBinaryRecord)) 'Version binary helper reports missing Windows binary'
 Assert-ThrowsLike { Assert-FusionWatcherNewBuildNotAlreadyRecorded -Package $packageWithVersions -BuildVersion '2702.1.58' } '*already has Fusion version 2702.1.58*' 'Fusion watcher duplicate guard rejects changed release signal with existing inventory build'
 Assert-Equal (Assert-FusionWatcherNewBuildNotAlreadyRecorded -Package $packageWithVersions -BuildVersion '2702.1.99') '2702.1.99' 'Fusion watcher duplicate guard allows new inventory build'
 
