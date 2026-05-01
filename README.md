@@ -38,21 +38,26 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\src\Invoke-FusionManag
 
 ## Watcher Dry Run
 
+Replace the sample build with the currently observed Fusion build before relying on the output:
+
 ```powershell
 $env:FUSION_OBSERVED_BUILD_VERSION='2702.1.58'
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\src\Watch-FusionAction1Release.ps1 -DryRun
 ```
+
+After testing, clear or reset `FUSION_OBSERVED_BUILD_VERSION` so a sample value is not reused for live version creation.
 
 ## Live Watcher Environment
 
 Set these environment variables before live Action1 writes:
 ```powershell
 $env:ACTION1_ACCESS_TOKEN='<Action1 bearer token>'
-$env:ACTION1_ORG_ID='<Action1 organization id or all>'
 $env:ACTION1_FUSION_PACKAGE_ID='<Action1 package id>'
+$env:ACTION1_ORG_ID='<Action1 organization id or all>'
+$env:FUSION_OBSERVED_BUILD_VERSION='<current dotted Fusion build, for example 2702.1.58>'
 ```
 
-Live watcher runs also require `FUSION_OBSERVED_BUILD_VERSION` to be set to a real dotted numeric Fusion build version, such as `2702.1.58`.
+`ACTION1_ORG_ID` defaults to `all` if unset. Live watcher runs require `FUSION_OBSERVED_BUILD_VERSION` to be set to the current observed Fusion build; the script validates only dotted numeric shape, not whether the value is the latest Autodesk build.
 
 Do not run live watcher mode until the manual gates in `action1/validation-notes.md` are complete. The script enforces build version, package ID, and token checks; it does not enforce the Action1 match-conflict gate by itself.
 
@@ -62,8 +67,13 @@ Do not run live watcher mode until the manual gates in `action1/validation-notes
 2. Build `dist\FusionManagedUpdater.cmd`.
 3. Run watcher dry-run.
 4. Complete the live-write preconditions in `action1/validation-notes.md`, including a successful match-conflict result with no blocking or conflicting package matches.
-5. Validate Action1 package/version dry-runs.
+5. Validate Action1 package/version dry-runs using the connector, API, or UI flow documented in `action1/validation-notes.md`.
 6. Record the final conflict-check result and dry-run previews in `action1/validation-notes.md`.
-7. Deploy to one pilot endpoint.
-8. Refresh Action1 installed software inventory.
-9. Approve broader deployment.
+7. Set `FUSION_OBSERVED_BUILD_VERSION` to the current observed Fusion build.
+8. Run the live watcher without `-DryRun` to create the Action1 version:
+   ```powershell
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\src\Watch-FusionAction1Release.ps1
+   ```
+9. Deploy to one pilot endpoint.
+10. Refresh Action1 installed software inventory.
+11. Approve broader deployment.
