@@ -111,11 +111,14 @@ function Get-FusionSettingValue {
         [string]$Default = ''
     )
 
+    $value = $null
     if ($Environment -and $Environment.ContainsKey($Name)) {
-        return [string]$Environment[$Name]
+        $value = [string]$Environment[$Name]
+    }
+    else {
+        $value = [Environment]::GetEnvironmentVariable($Name)
     }
 
-    $value = [Environment]::GetEnvironmentVariable($Name)
     if ([string]::IsNullOrWhiteSpace($value)) {
         return $Default
     }

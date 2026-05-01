@@ -163,6 +163,21 @@ Assert-Equal $containerConfig.PackageName 'Autodesk Fusion Managed Updater' 'Con
 Assert-Equal $containerConfig.OneShot $true 'Container config defaults to one-shot mode'
 Assert-Equal $containerConfig.CheckFrequencyMinutes 1440 'Container config defaults to daily interval'
 
+$blankOptionalConfig = Get-FusionContainerRuntimeConfig -Environment @{
+    ACTION1_CLIENT_ID = 'client-id'
+    ACTION1_CLIENT_SECRET = 'client-secret'
+    ACTION1_BASE_URL = ''
+    ACTION1_ORG_ID = ' '
+    PACKAGE_NAME = $null
+    CHECK_FREQUENCY_MINUTES = ''
+    ONE_SHOT = ' '
+}
+Assert-Equal $blankOptionalConfig.Action1BaseUrl 'https://app.action1.com/api/3.0' 'Container config defaults blank injected Action1 base URL'
+Assert-Equal $blankOptionalConfig.Action1OrgId 'all' 'Container config defaults blank injected Action1 org id'
+Assert-Equal $blankOptionalConfig.PackageName 'Autodesk Fusion Managed Updater' 'Container config defaults blank injected package name'
+Assert-Equal $blankOptionalConfig.CheckFrequencyMinutes 1440 'Container config defaults blank injected interval schedule'
+Assert-Equal $blankOptionalConfig.OneShot $true 'Container config defaults blank injected one-shot setting'
+
 $scheduledConfig = Get-FusionContainerRuntimeConfig -Environment @{
     ACTION1_CLIENT_ID = 'client-id'
     ACTION1_CLIENT_SECRET = 'client-secret'
