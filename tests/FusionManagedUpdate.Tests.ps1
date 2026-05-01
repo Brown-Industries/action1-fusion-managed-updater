@@ -7,6 +7,16 @@ $endpointScript = Join-Path $repoRoot 'src/Invoke-FusionManagedUpdate.ps1'
 $watcherScript = Join-Path $repoRoot 'src/Watch-FusionAction1Release.ps1'
 $payloadBuilder = Join-Path $repoRoot 'packaging/build-action1-payload.ps1'
 
+function Get-TestPowerShellCommand {
+    $pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
+    if ($pwsh) { return $pwsh.Source }
+    return 'powershell.exe'
+}
+
+$testPowerShell = Get-TestPowerShellCommand
+
+Assert-True (-not [string]::IsNullOrWhiteSpace($testPowerShell)) 'Test runner resolves a PowerShell executable'
+
 function Assert-ThrowsLike {
     param(
         [Parameter(Mandatory = $true)][scriptblock]$ScriptBlock,
@@ -29,7 +39,7 @@ function Invoke-EndpointScript {
     $previousErrorActionPreference = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $endpointScript @Arguments 2>&1
+        $output = & $testPowerShell -NoProfile -ExecutionPolicy Bypass -File $endpointScript @Arguments 2>&1
     }
     finally {
         $ErrorActionPreference = $previousErrorActionPreference
@@ -46,7 +56,7 @@ function Invoke-WatcherScript {
     $previousErrorActionPreference = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $watcherScript @Arguments 2>&1
+        $output = & $testPowerShell -NoProfile -ExecutionPolicy Bypass -File $watcherScript @Arguments 2>&1
     }
     finally {
         $ErrorActionPreference = $previousErrorActionPreference
@@ -63,7 +73,7 @@ function Invoke-PayloadBuilder {
     $previousErrorActionPreference = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $payloadBuilder -OutputPath $OutputPath 2>&1
+        $output = & $testPowerShell -NoProfile -ExecutionPolicy Bypass -File $payloadBuilder -OutputPath $OutputPath 2>&1
     }
     finally {
         $ErrorActionPreference = $previousErrorActionPreference
