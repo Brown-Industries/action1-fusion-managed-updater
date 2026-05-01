@@ -104,6 +104,80 @@ function New-Action1FusionVersionBody {
     }
 }
 
+function Get-FusionSettingValue {
+    param(
+        [hashtable]$Environment,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [string]$Default = ''
+    )
+
+    if ($Environment -and $Environment.ContainsKey($Name)) {
+        return [string]$Environment[$Name]
+    }
+
+    $value = [Environment]::GetEnvironmentVariable($Name)
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        return $Default
+    }
+    return $value
+}
+
+function ConvertTo-FusionBooleanSetting {
+    param(
+        [string]$Value,
+        [bool]$Default = $false,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $Default
+    }
+
+    switch -Regex ($Value.Trim()) {
+        '^(1|true|yes|y)$' { return $true }
+        '^(0|false|no|n)$' { return $false }
+        default { throw "$Name must be true or false." }
+    }
+}
+
+function Get-FusionContainerRuntimeConfig {
+    param([hashtable]$Environment = $null)
+
+    $clientId = Get-FusionSettingValue -Environment $Environment -Name 'ACTION1_CLIENT_ID'
+    $clientSecret = Get-FusionSettingValue -Environment $Environment -Name 'ACTION1_CLIENT_SECRET'
+    if ([string]::IsNullOrWhiteSpace($clientId)) { throw 'ACTION1_CLIENT_ID is required.' }
+    if ([string]::IsNullOrWhiteSpace($clientSecret)) { throw 'ACTION1_CLIENT_SECRET is required.' }
+
+    $minutesText = Get-FusionSettingValue -Environment $Environment -Name 'CHECK_FREQUENCY_MINUTES' -Default '1440'
+    $minutes = 0
+    if (-not [int]::TryParse($minutesText, [ref]$minutes) -or $minutes -lt 1) {
+        throw 'CHECK_FREQUENCY_MINUTES must be a positive integer.'
+    }
+
+    [pscustomobject]@{
+        Action1ClientId       = $clientId
+        Action1ClientSecret   = $clientSecret
+        Action1BaseUrl        = (Get-FusionSettingValue -Environment $Environment -Name 'ACTION1_BASE_URL' -Default 'https://app.action1.com/api/3.0').TrimEnd('/')
+        Action1OrgId          = Get-FusionSettingValue -Environment $Environment -Name 'ACTION1_ORG_ID' -Default 'all'
+        PackageName           = Get-FusionSettingValue -Environment $Environment -Name 'PACKAGE_NAME' -Default 'Autodesk Fusion Managed Updater'
+        OneShot               = ConvertTo-FusionBooleanSetting -Value (Get-FusionSettingValue -Environment $Environment -Name 'ONE_SHOT' -Default 'true') -Default $true -Name 'ONE_SHOT'
+        CheckFrequencyCron    = Get-FusionSettingValue -Environment $Environment -Name 'CHECK_FREQUENCY_CRON'
+        CheckFrequencyMinutes = $minutes
+    }
+}
+
+function New-Action1FusionPackageBody {
+    param([Parameter(Mandatory = $true)][string]$PackageName)
+
+    [ordered]@{
+        name           = $PackageName
+        vendor         = 'Autodesk'
+        description    = "Small Action1-managed updater for Autodesk Fusion. Historical versions are release records only; Autodesk's live streamer controls the actual installable build."
+        platform       = 'Windows'
+        internal_notes = "Do not use this package for rollback. Deployments run Autodesk's currently available Fusion streamer update."
+    }
+}
+
 function Test-AutodeskHeadChanged {
     param(
         [Parameter(Mandatory = $true)]$State,
@@ -343,4 +417,4 @@ function Get-FusionBlockingProcesses {
     return $Processes | Where-Object { $names -contains $_.ProcessName }
 }
 
-Export-ModuleMember -Function ConvertTo-FusionVersionParts, Compare-FusionVersion, Read-FusionInfoFile, Get-HighestFusionInventoryVersion, New-HistoricalVersionWarning, New-Action1FusionVersionBody, Test-AutodeskHeadChanged, New-FusionWatcherDryRunResult, Assert-FusionWatcherLiveBuildVersion, Resolve-FusionWatcherBuildVersion, Test-Action1PackageVersionContainerPresent, Get-Action1PackageVersionRecords, Get-Action1PackageVersionValues, Test-Action1PackageHasVersion, Assert-FusionWatcherNewBuildNotAlreadyRecorded, Write-FusionWatcherState, Get-AutodeskInstallerHead, ConvertFrom-AutodeskInstallerHeadRecord, Get-LatestFusionStreamer, Get-FusionBlockingProcesses
+Export-ModuleMember -Function ConvertTo-FusionVersionParts, Compare-FusionVersion, Read-FusionInfoFile, Get-HighestFusionInventoryVersion, New-HistoricalVersionWarning, New-Action1FusionVersionBody, Get-FusionContainerRuntimeConfig, New-Action1FusionPackageBody, Test-AutodeskHeadChanged, New-FusionWatcherDryRunResult, Assert-FusionWatcherLiveBuildVersion, Resolve-FusionWatcherBuildVersion, Test-Action1PackageVersionContainerPresent, Get-Action1PackageVersionRecords, Get-Action1PackageVersionValues, Test-Action1PackageHasVersion, Assert-FusionWatcherNewBuildNotAlreadyRecorded, Write-FusionWatcherState, Get-AutodeskInstallerHead, ConvertFrom-AutodeskInstallerHeadRecord, Get-LatestFusionStreamer, Get-FusionBlockingProcesses

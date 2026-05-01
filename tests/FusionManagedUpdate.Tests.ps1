@@ -151,6 +151,44 @@ Assert-True (-not $versionBody.Contains('internal_notes')) 'Action1 version body
 Assert-Equal $versionBody.silent_install_switches '' 'Action1 payload launcher needs no switches'
 Assert-Equal $versionBody.success_exit_codes '0' 'Action1 success exit code is zero'
 
+$containerConfig = Get-FusionContainerRuntimeConfig -Environment @{
+    ACTION1_CLIENT_ID = 'client-id'
+    ACTION1_CLIENT_SECRET = 'client-secret'
+}
+Assert-Equal $containerConfig.Action1ClientId 'client-id' 'Container config reads Action1 client id'
+Assert-Equal $containerConfig.Action1ClientSecret 'client-secret' 'Container config reads Action1 client secret'
+Assert-Equal $containerConfig.Action1BaseUrl 'https://app.action1.com/api/3.0' 'Container config defaults Action1 base URL'
+Assert-Equal $containerConfig.Action1OrgId 'all' 'Container config defaults Action1 org id'
+Assert-Equal $containerConfig.PackageName 'Autodesk Fusion Managed Updater' 'Container config defaults package name'
+Assert-Equal $containerConfig.OneShot $true 'Container config defaults to one-shot mode'
+Assert-Equal $containerConfig.CheckFrequencyMinutes 1440 'Container config defaults to daily interval'
+
+$scheduledConfig = Get-FusionContainerRuntimeConfig -Environment @{
+    ACTION1_CLIENT_ID = 'client-id'
+    ACTION1_CLIENT_SECRET = 'client-secret'
+    ONE_SHOT = 'false'
+    CHECK_FREQUENCY_CRON = '0 */6 * * *'
+    CHECK_FREQUENCY_MINUTES = '30'
+}
+Assert-Equal $scheduledConfig.OneShot $false 'Container config supports long-running mode'
+Assert-Equal $scheduledConfig.CheckFrequencyCron '0 */6 * * *' 'Container config reads cron schedule'
+Assert-Equal $scheduledConfig.CheckFrequencyMinutes 30 'Container config reads interval schedule'
+
+Assert-ThrowsLike {
+    Get-FusionContainerRuntimeConfig -Environment @{ ACTION1_CLIENT_ID = 'client-id' }
+} '*ACTION1_CLIENT_SECRET*' 'Container config requires Action1 client secret'
+
+Assert-ThrowsLike {
+    Get-FusionContainerRuntimeConfig -Environment @{ ACTION1_CLIENT_SECRET = 'client-secret' }
+} '*ACTION1_CLIENT_ID*' 'Container config requires Action1 client id'
+
+$packageBody = New-Action1FusionPackageBody -PackageName 'Autodesk Fusion Managed Updater'
+Assert-Equal $packageBody.name 'Autodesk Fusion Managed Updater' 'Package body uses requested package name'
+Assert-Equal $packageBody.vendor 'Autodesk' 'Package body uses Autodesk vendor'
+Assert-Equal $packageBody.platform 'Windows' 'Package body targets Windows'
+Assert-True ($packageBody.description -like '*Historical versions are release records only*') 'Package body warns about historical records'
+Assert-True ($packageBody.internal_notes -like '*Do not use this package for rollback*') 'Package body warns against rollback'
+
 $unchangedDryRun = New-FusionWatcherDryRunResult -State $autodeskHead -AutodeskHead $autodeskHead -BuildVersion '2702.1.58' -DetectedDate '2026-04-30' -PayloadFileName 'FusionManagedUpdater.cmd'
 Assert-Equal $unchangedDryRun.Changed $false 'Fusion watcher dry-run result reports unchanged installer state'
 Assert-Equal $unchangedDryRun.AutodeskHead.ETag $autodeskHead.ETag 'Fusion watcher dry-run result includes Autodesk HEAD when unchanged'
