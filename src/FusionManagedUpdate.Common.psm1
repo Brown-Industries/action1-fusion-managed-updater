@@ -175,7 +175,8 @@ function New-FusionContainerScheduleCommand {
         [Parameter(Mandatory = $true)][string]$SyncScriptPath
     )
 
-    $command = "pwsh -NoProfile -ExecutionPolicy Bypass -File `"$SyncScriptPath`""
+    $quotedSyncScriptPath = ConvertTo-FusionBashSingleQuotedArgument -Value $SyncScriptPath
+    $command = "pwsh -NoProfile -ExecutionPolicy Bypass -File $quotedSyncScriptPath"
     if (-not [string]::IsNullOrWhiteSpace([string]$Config.CheckFrequencyCron)) {
         return [pscustomobject]@{
             Kind       = 'Cron'
@@ -189,6 +190,12 @@ function New-FusionContainerScheduleCommand {
         Seconds = [int]$Config.CheckFrequencyMinutes * 60
         Command = $command
     }
+}
+
+function ConvertTo-FusionBashSingleQuotedArgument {
+    param([Parameter(Mandatory = $true)][string]$Value)
+
+    return "'$($Value.Replace("'", "'\''"))'"
 }
 
 function Assert-FusionContainerCronExpression {
@@ -235,6 +242,19 @@ function New-FusionContainerCronEnvironmentSpec {
     [pscustomobject]@{
         Mode  = '0600'
         Lines = @($lines)
+    }
+}
+
+function Invoke-FusionContainerSyncOnce {
+    param(
+        [Parameter(Mandatory = $true)][string]$ScriptPath,
+        [string]$PowerShellCommand = 'pwsh'
+    )
+
+    & $PowerShellCommand -NoProfile -ExecutionPolicy Bypass -File $ScriptPath
+    $exitCode = $LASTEXITCODE
+    if ($null -ne $exitCode -and $exitCode -ne 0) {
+        throw "Fusion container sync script '$ScriptPath' exited with code $exitCode."
     }
 }
 
@@ -556,4 +576,4 @@ function Get-FusionBlockingProcesses {
     return $Processes | Where-Object { $names -contains $_.ProcessName }
 }
 
-Export-ModuleMember -Function ConvertTo-FusionVersionParts, Compare-FusionVersion, Read-FusionInfoFile, Get-HighestFusionInventoryVersion, New-HistoricalVersionWarning, New-Action1FusionVersionBody, Get-FusionContainerRuntimeConfig, New-FusionContainerScheduleCommand, Assert-FusionContainerCronExpression, New-FusionContainerCronEnvironmentSpec, Invoke-FusionContainerStartupSync, New-Action1FusionPackageBody, Test-AutodeskHeadChanged, New-FusionWatcherDryRunResult, Assert-FusionWatcherLiveBuildVersion, Resolve-FusionWatcherBuildVersion, Test-Action1PackageVersionContainerPresent, Get-Action1PackageVersionRecords, Get-Action1PackageVersionValues, Test-Action1PackageHasVersion, Get-Action1PackageVersionRecord, Test-Action1PackageVersionHasWindowsBinary, Assert-FusionWatcherNewBuildNotAlreadyRecorded, Write-FusionWatcherState, Get-AutodeskInstallerHead, ConvertFrom-AutodeskInstallerHeadRecord, Get-LatestFusionStreamer, Get-FusionBlockingProcesses
+Export-ModuleMember -Function ConvertTo-FusionVersionParts, Compare-FusionVersion, Read-FusionInfoFile, Get-HighestFusionInventoryVersion, New-HistoricalVersionWarning, New-Action1FusionVersionBody, Get-FusionContainerRuntimeConfig, New-FusionContainerScheduleCommand, Assert-FusionContainerCronExpression, New-FusionContainerCronEnvironmentSpec, Invoke-FusionContainerSyncOnce, Invoke-FusionContainerStartupSync, New-Action1FusionPackageBody, Test-AutodeskHeadChanged, New-FusionWatcherDryRunResult, Assert-FusionWatcherLiveBuildVersion, Resolve-FusionWatcherBuildVersion, Test-Action1PackageVersionContainerPresent, Get-Action1PackageVersionRecords, Get-Action1PackageVersionValues, Test-Action1PackageHasVersion, Get-Action1PackageVersionRecord, Test-Action1PackageVersionHasWindowsBinary, Assert-FusionWatcherNewBuildNotAlreadyRecorded, Write-FusionWatcherState, Get-AutodeskInstallerHead, ConvertFrom-AutodeskInstallerHeadRecord, Get-LatestFusionStreamer, Get-FusionBlockingProcesses

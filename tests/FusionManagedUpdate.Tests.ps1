@@ -247,6 +247,13 @@ Assert-Equal $cronCommand.Kind 'Cron' 'Schedule command prefers cron mode'
 Assert-Equal $cronCommand.Expression '0 */6 * * *' 'Schedule command preserves cron expression'
 Assert-True ($cronCommand.Command -like '*Invoke-FusionAction1RepositorySync.ps1*') 'Schedule command includes sync script'
 
+$unsafePathCommand = New-FusionContainerScheduleCommand -Config ([pscustomobject]@{
+    CheckFrequencyCron = '0 */6 * * *'
+    CheckFrequencyMinutes = 1440
+}) -SyncScriptPath "/tmp/sync'; echo injected #.ps1"
+Assert-Equal $unsafePathCommand.Command "pwsh -NoProfile -ExecutionPolicy Bypass -File '/tmp/sync'\''; echo injected #.ps1'" 'Schedule command shell-quotes sync script path'
+Assert-True (-not ($unsafePathCommand.Command -like '*"/tmp/sync*')) 'Schedule command does not use unsafe double-quoted script path'
+
 Assert-Equal (Assert-FusionContainerCronExpression -Expression '0 */6 * * *') '0 */6 * * *' 'Cron validation accepts five-field expression'
 
 Assert-ThrowsLike {
@@ -305,6 +312,17 @@ Assert-Equal $scheduledStartupResult.Succeeded $false 'Scheduled startup sync fa
 Assert-Equal $scheduledStartupResult.ContinueScheduling $true 'Scheduled startup sync failure continues scheduling'
 Assert-Equal $scheduledStartupState.Attempts 1 'Scheduled startup sync runs once before continuing'
 Assert-True ($scheduledStartupState.Logged -like '*transient startup failed*') 'Scheduled startup sync logs startup failure'
+
+$failingSyncScript = Join-Path ([System.IO.Path]::GetTempPath()) "fusion-sync-fails-$([guid]::NewGuid().ToString('N')).ps1"
+try {
+    Set-Content -LiteralPath $failingSyncScript -Value 'exit 17' -Encoding ASCII
+    Assert-ThrowsLike {
+        Invoke-FusionContainerSyncOnce -ScriptPath $failingSyncScript -PowerShellCommand $testPowerShell
+    } '*exited with code 17*' 'Container sync wrapper throws on child process nonzero exit'
+}
+finally {
+    Remove-Item -LiteralPath $failingSyncScript -Force -ErrorAction SilentlyContinue
+}
 
 Assert-ThrowsLike {
     Get-FusionContainerRuntimeConfig -Environment @{ ACTION1_CLIENT_ID = 'client-id' }

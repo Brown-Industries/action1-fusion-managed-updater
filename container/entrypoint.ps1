@@ -11,13 +11,8 @@ Import-Module '/app/src/FusionManagedUpdate.Common.psm1' -Force
 $config = Get-FusionContainerRuntimeConfig
 $schedule = New-FusionContainerScheduleCommand -Config $config -SyncScriptPath $SyncScriptPath
 
-function Invoke-SyncOnce {
-    param([Parameter(Mandatory = $true)][string]$ScriptPath)
-    & pwsh -NoProfile -ExecutionPolicy Bypass -File $ScriptPath
-}
-
 $null = Invoke-FusionContainerStartupSync -OneShot $config.OneShot -SyncCommand {
-    Invoke-SyncOnce -ScriptPath $SyncScriptPath
+    Invoke-FusionContainerSyncOnce -ScriptPath $SyncScriptPath
 }
 
 if ($config.OneShot) {
@@ -28,7 +23,7 @@ if ($schedule.Kind -eq 'Interval') {
     while ($true) {
         Start-Sleep -Seconds $schedule.Seconds
         try {
-            Invoke-SyncOnce -ScriptPath $SyncScriptPath
+            Invoke-FusionContainerSyncOnce -ScriptPath $SyncScriptPath
         }
         catch {
             Write-Error $_ -ErrorAction Continue
