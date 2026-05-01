@@ -96,7 +96,7 @@ function New-Action1FusionVersionBody {
         security_severity       = 'Unspecified'
         silent_install_switches = $PayloadFileName
         success_exit_codes      = '0'
-        reboot_exit_codes       = ''
+        reboot_exit_codes       = '1641,3010'
         install_type            = 'other'
         update_type             = 'Regular Updates'
         os                      = @('Windows 10', 'Windows 11')

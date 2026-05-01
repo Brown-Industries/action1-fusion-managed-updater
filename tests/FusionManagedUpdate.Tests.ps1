@@ -194,6 +194,7 @@ Assert-True (-not $versionBody.Contains('internal_notes')) 'Action1 version body
 Assert-Equal $versionBody.install_type 'other' 'Action1 CMD payload uses Other installation type'
 Assert-Equal $versionBody.silent_install_switches 'FusionManagedUpdater.cmd' 'Action1 Other payload names CMD launcher in silent install switches'
 Assert-Equal $versionBody.success_exit_codes '0' 'Action1 success exit code is zero'
+Assert-Equal $versionBody.reboot_exit_codes '1641,3010' 'Action1 version body uses default reboot exit codes'
 
 $containerConfig = Get-FusionContainerRuntimeConfig -Environment @{
     ACTION1_CLIENT_ID = 'client-id'
