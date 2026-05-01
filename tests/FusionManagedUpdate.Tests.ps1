@@ -37,6 +37,27 @@ function Assert-ThrowsLike {
     }
 }
 
+function Assert-ThrowsLikeAndNotLike {
+    param(
+        [Parameter(Mandatory = $true)][scriptblock]$ScriptBlock,
+        [Parameter(Mandatory = $true)][string]$Pattern,
+        [Parameter(Mandatory = $true)][string[]]$ForbiddenPatterns,
+        [Parameter(Mandatory = $true)][string]$Message
+    )
+
+    try {
+        & $ScriptBlock
+        Assert-True $false $Message
+    }
+    catch {
+        $exceptionMessage = $_.Exception.Message
+        Assert-True ($exceptionMessage -like $Pattern) $Message
+        foreach ($forbiddenPattern in $ForbiddenPatterns) {
+            Assert-True (-not ($exceptionMessage -like $forbiddenPattern)) "$Message does not leak $forbiddenPattern"
+        }
+    }
+}
+
 function Invoke-EndpointScript {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
 
@@ -274,6 +295,98 @@ Assert-Equal $uploadHeaders.'X-Upload-Content-Length' '123' 'Upload init sets co
 $putHeaders = New-Action1UploadPutHeaders -AccessToken 'token' -PayloadLength 123
 Assert-Equal $putHeaders.Authorization 'Bearer token' 'Upload PUT includes bearer token'
 Assert-Equal $putHeaders.'Content-Range' 'bytes 0-122/123' 'Upload PUT sets content range'
+
+Assert-ThrowsLike { New-Action1UploadInitHeaders -AccessToken 'token' -PayloadLength 0 } '*PayloadLength must be at least 1*' 'Upload init rejects zero payload length'
+Assert-ThrowsLike { New-Action1UploadInitHeaders -AccessToken 'token' -PayloadLength -1 } '*PayloadLength must be at least 1*' 'Upload init rejects negative payload length'
+Assert-ThrowsLike { New-Action1UploadPutHeaders -AccessToken 'token' -PayloadLength 0 } '*PayloadLength must be at least 1*' 'Upload PUT rejects zero payload length'
+Assert-ThrowsLike { New-Action1UploadPutHeaders -AccessToken 'token' -PayloadLength -1 } '*PayloadLength must be at least 1*' 'Upload PUT rejects negative payload length'
+
+$uploadTempRoot = Join-Path $env:TEMP ('fmu-upload-test-' + [guid]::NewGuid().ToString('N'))
+try {
+    New-Item -ItemType Directory -Path $uploadTempRoot -Force | Out-Null
+    $emptyPayloadPath = Join-Path $uploadTempRoot 'empty.cmd'
+    Set-Content -LiteralPath $emptyPayloadPath -Encoding ASCII -NoNewline -Value ''
+    $uploadCalls = @()
+    Assert-ThrowsLike {
+        Send-Action1VersionPayload -BaseUrl 'https://action1.invalid/api/3.0' -OrgId 'all' -PackageId 'pkg-1' -VersionId 'ver-1' -AccessToken 'secret-token' -PayloadPath $emptyPayloadPath -RequestCommand {
+            param($Method, $Uri, $Headers, $ContentType, $Body)
+            $script:uploadCalls += $Method
+        }
+    } '*Payload file must not be empty*' 'Version payload upload rejects empty payload before init'
+    Assert-Equal $uploadCalls.Count 0 'Version payload upload does not initialize empty payload'
+
+    $payloadPath = Join-Path $uploadTempRoot 'payload.cmd'
+    [IO.File]::WriteAllBytes($payloadPath, [byte[]](65, 66, 67))
+
+    Assert-ThrowsLikeAndNotLike {
+        Send-Action1VersionPayload -BaseUrl 'https://action1.invalid/api/3.0' -OrgId 'all' -PackageId 'pkg-1' -VersionId 'ver-1' -AccessToken 'secret-token' -PayloadPath $payloadPath -RequestCommand {
+            param($Method, $Uri, $Headers, $ContentType, $Body)
+            return [pscustomobject]@{ StatusCode = 401; Headers = @{ 'X-Upload-Location' = 'https://action1.invalid/api/3.0/upload/session-1' } }
+        }
+    } '*pkg-1*ver-1*401*' @('*secret-token*', '*https://action1.invalid/api/3.0*') 'Version payload upload reports init non-2xx status with sanitized context'
+
+    Assert-ThrowsLikeAndNotLike {
+        Send-Action1VersionPayload -BaseUrl 'https://action1.invalid/api/3.0' -OrgId 'all' -PackageId 'pkg-1' -VersionId 'ver-1' -AccessToken 'secret-token' -PayloadPath $payloadPath -RequestCommand {
+            param($Method, $Uri, $Headers, $ContentType, $Body)
+            return [pscustomobject]@{ StatusCode = 200; Headers = @{} }
+        }
+    } '*X-Upload-Location*pkg-1*ver-1*' @('*secret-token*', '*https://action1.invalid/api/3.0*') 'Version payload upload reports missing upload location with sanitized context'
+
+    $mismatchCalls = @()
+    Assert-ThrowsLikeAndNotLike {
+        Send-Action1VersionPayload -BaseUrl 'https://action1.invalid/api/3.0' -OrgId 'all' -PackageId 'pkg-1' -VersionId 'ver-1' -AccessToken 'secret-token' -PayloadPath $payloadPath -RequestCommand {
+            param($Method, $Uri, $Headers, $ContentType, $Body)
+            $script:mismatchCalls += $Method
+            if ($Method -eq 'POST') {
+                return [pscustomobject]@{ StatusCode = 200; Headers = @{ 'X-Upload-Location' = 'https://evil.invalid/upload/session-1' } }
+            }
+            throw 'PUT should not be called for mismatched upload host'
+        }
+    } '*unexpected host*pkg-1*ver-1*' @('*secret-token*', '*evil.invalid/upload/session-1*') 'Version payload upload rejects mismatched upload host with sanitized context'
+    Assert-Equal ($mismatchCalls -join ',') 'POST' 'Version payload upload does not PUT to mismatched upload host'
+
+    Assert-ThrowsLikeAndNotLike {
+        Send-Action1VersionPayload -BaseUrl 'https://action1.invalid/api/3.0' -OrgId 'all' -PackageId 'pkg-1' -VersionId 'ver-1' -AccessToken 'secret-token' -PayloadPath $payloadPath -RequestCommand {
+            param($Method, $Uri, $Headers, $ContentType, $Body)
+            if ($Method -eq 'POST') {
+                return [pscustomobject]@{ StatusCode = 200; Headers = @{ 'X-Upload-Location' = 'https://action1.invalid/api/3.0/upload/session-1' } }
+            }
+            throw 'simulated transport failure https://action1.invalid/api/3.0/upload/session-1 secret-token'
+        }
+    } '*PUT*pkg-1*ver-1*' @('*secret-token*', '*upload/session-1*') 'Version payload upload sanitizes PUT failures'
+
+    $successfulUploadCalls = @()
+    Send-Action1VersionPayload -BaseUrl 'https://action1.invalid/api/3.0' -OrgId 'all' -PackageId 'pkg-1' -VersionId 'ver-1' -AccessToken 'secret-token' -PayloadPath $payloadPath -RequestCommand {
+        param($Method, $Uri, $Headers, $ContentType, $Body)
+        $script:successfulUploadCalls += [pscustomobject]@{
+            Method      = $Method
+            UriHost     = ([uri]$Uri).Host
+            UriPath     = ([uri]$Uri).AbsolutePath
+            Headers     = $Headers
+            ContentType = $ContentType
+            Body        = $Body
+        }
+        if ($Method -eq 'POST') {
+            return [pscustomobject]@{ StatusCode = 200; Headers = @{ 'X-Upload-Location' = 'https://action1.invalid/api/3.0/upload/session-1' } }
+        }
+        return [pscustomobject]@{ StatusCode = 200; Headers = @{} }
+    }
+    Assert-Equal $successfulUploadCalls.Count 2 'Version payload upload sends init and PUT requests'
+    Assert-Equal $successfulUploadCalls[0].Method 'POST' 'Version payload upload initializes with POST'
+    Assert-Equal $successfulUploadCalls[0].UriHost 'action1.invalid' 'Version payload upload init uses base host'
+    Assert-Equal $successfulUploadCalls[0].Headers.Authorization 'Bearer secret-token' 'Version payload upload init sends bearer token'
+    Assert-Equal $successfulUploadCalls[0].Headers.'X-Upload-Content-Length' '3' 'Version payload upload init sends payload length'
+    Assert-Equal $successfulUploadCalls[1].Method 'PUT' 'Version payload upload sends payload with PUT'
+    Assert-Equal $successfulUploadCalls[1].UriHost 'action1.invalid' 'Version payload upload PUT uses allowed host'
+    Assert-Equal $successfulUploadCalls[1].Headers.Authorization 'Bearer secret-token' 'Version payload upload PUT sends bearer token'
+    Assert-Equal $successfulUploadCalls[1].Headers.'Content-Range' 'bytes 0-2/3' 'Version payload upload PUT sends content range'
+    Assert-Equal ([string]::Join(',', $successfulUploadCalls[1].Body)) '65,66,67' 'Version payload upload sends payload bytes'
+}
+finally {
+    if (Test-Path -LiteralPath $uploadTempRoot) {
+        Remove-Item -LiteralPath $uploadTempRoot -Recurse -Force
+    }
+}
 
 $unchangedDryRun = New-FusionWatcherDryRunResult -State $autodeskHead -AutodeskHead $autodeskHead -BuildVersion '2702.1.58' -DetectedDate '2026-04-30' -PayloadFileName 'FusionManagedUpdater.cmd'
 Assert-Equal $unchangedDryRun.Changed $false 'Fusion watcher dry-run result reports unchanged installer state'
