@@ -9,6 +9,7 @@ if (Test-Path -LiteralPath $action1ModulePath) {
 $fixtureRoot = Join-Path $PSScriptRoot 'fixtures'
 $endpointScript = Join-Path $repoRoot 'src/Invoke-FusionManagedUpdate.ps1'
 $watcherScript = Join-Path $repoRoot 'src/Watch-FusionAction1Release.ps1'
+$syncScript = Join-Path $repoRoot 'src/Invoke-FusionAction1RepositorySync.ps1'
 $payloadBuilder = Join-Path $repoRoot 'packaging/build-action1-payload.ps1'
 
 function Get-TestPowerShellCommand {
@@ -82,6 +83,23 @@ function Invoke-WatcherScript {
     $ErrorActionPreference = 'Continue'
     try {
         $output = & $testPowerShell -NoProfile -ExecutionPolicy Bypass -File $watcherScript @Arguments 2>&1
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    [pscustomobject]@{
+        ExitCode = $LASTEXITCODE
+        Output   = ($output | Out-String)
+    }
+}
+
+function Invoke-SyncScript {
+    param([Parameter(Mandatory = $true)][string[]]$Arguments)
+
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = & $testPowerShell -NoProfile -ExecutionPolicy Bypass -File $syncScript @Arguments 2>&1
     }
     finally {
         $ErrorActionPreference = $previousErrorActionPreference
@@ -555,6 +573,38 @@ finally {
     if (Test-Path -LiteralPath $watcherLiveTempRoot) {
         Remove-Item -LiteralPath $watcherLiveTempRoot -Recurse -Force
     }
+}
+
+$syncTempRoot = Join-Path $env:TEMP ('fmu-sync-test-' + [guid]::NewGuid().ToString('N'))
+$previousAction1ClientId = $env:ACTION1_CLIENT_ID
+$previousAction1ClientSecret = $env:ACTION1_CLIENT_SECRET
+$previousPackageName = $env:PACKAGE_NAME
+try {
+    New-Item -ItemType Directory -Path $syncTempRoot -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $syncTempRoot 'token.json') -Encoding ASCII -Value '{"access_token":"offline-token"}'
+    Set-Content -LiteralPath (Join-Path $syncTempRoot 'packages.json') -Encoding ASCII -Value '{"items":[{"id":"pkg-1","name":"Autodesk Fusion Managed Updater"}]}'
+    Set-Content -LiteralPath (Join-Path $syncTempRoot 'installed-software.json') -Encoding ASCII -Value ($inventory | ConvertTo-Json -Depth 20 -Compress)
+    Set-Content -LiteralPath (Join-Path $syncTempRoot 'package.json') -Encoding ASCII -Value '{"id":"pkg-1","versions":[{"id":"version-1","version":"2702.1.58","binary_id":{"Windows_64":"binary-1"}}]}'
+
+    $env:ACTION1_CLIENT_ID = 'client-id'
+    $env:ACTION1_CLIENT_SECRET = 'client-secret'
+    $env:PACKAGE_NAME = 'Autodesk Fusion Managed Updater'
+
+    $noOpResult = Invoke-SyncScript -Arguments @('-OfflineFixtureRoot', $syncTempRoot, '-PayloadPath', (Join-Path $repoRoot 'dist/FusionManagedUpdater.cmd'))
+    Assert-Equal $noOpResult.ExitCode 0 'Stateless sync exits 0 when version is already recorded'
+    Assert-True ($noOpResult.Output -like '*already recorded*') 'Stateless sync reports already-recorded version'
+
+    Set-Content -LiteralPath (Join-Path $syncTempRoot 'package.json') -Encoding ASCII -Value '{"id":"pkg-1","versions":[]}'
+    Remove-Item -LiteralPath (Join-Path $syncTempRoot 'api-requests.log') -ErrorAction SilentlyContinue
+    $createResult = Invoke-SyncScript -Arguments @('-OfflineFixtureRoot', $syncTempRoot, '-PayloadPath', (Join-Path $repoRoot 'dist/FusionManagedUpdater.cmd'))
+    Assert-Equal $createResult.ExitCode 0 'Stateless sync exits 0 after creating and uploading missing version'
+    Assert-True ($createResult.Output -like '*Created Action1 Fusion history version for 2702.1.58*') 'Stateless sync reports created version'
+}
+finally {
+    if ($null -eq $previousAction1ClientId) { Remove-Item Env:\ACTION1_CLIENT_ID -ErrorAction SilentlyContinue } else { $env:ACTION1_CLIENT_ID = $previousAction1ClientId }
+    if ($null -eq $previousAction1ClientSecret) { Remove-Item Env:\ACTION1_CLIENT_SECRET -ErrorAction SilentlyContinue } else { $env:ACTION1_CLIENT_SECRET = $previousAction1ClientSecret }
+    if ($null -eq $previousPackageName) { Remove-Item Env:\PACKAGE_NAME -ErrorAction SilentlyContinue } else { $env:PACKAGE_NAME = $previousPackageName }
+    if (Test-Path -LiteralPath $syncTempRoot) { Remove-Item -LiteralPath $syncTempRoot -Recurse -Force }
 }
 
 $stateTempRoot = Join-Path $env:TEMP ('fmu-state-test-' + [guid]::NewGuid().ToString('N'))
