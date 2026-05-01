@@ -16,7 +16,7 @@ The Action1 connector returned a structured-content shape error before exposing 
 Invalid input: expected record, received array
 ```
 
-Package creation should still run the match-conflict check again before the first live Action1 write.
+This was observed through the `action1_check_package_match_conflicts` connector tool. No match-conflict conclusion was reached. Live package creation is blocked until this check succeeds through the connector, direct Action1 API, or Action1 UI.
 
 ## Package Dry Run
 
@@ -48,3 +48,43 @@ New-Action1FusionVersionBody -BuildVersion '2702.1.58' -DetectedDate '2026-04-30
 
 The generated body includes the historical-version warning in both `description` and `internal_notes`.
 
+Version dry-run request body:
+
+```json
+{
+  "version": "2702.1.58",
+  "app_name_match": "^Autodesk Fusion(?: 360)?$",
+  "description": "This version records Autodesk Fusion build 2702.1.58 as detected on 2026-04-30. Fusion is delivered by Autodesk's live streamer endpoint. Deploying this or any older version will update the endpoint to Autodesk's currently available Fusion build, not necessarily this historical build. Only the latest Autodesk-served Fusion build is installable through this package.",
+  "internal_notes": "This version records Autodesk Fusion build 2702.1.58 as detected on 2026-04-30. Fusion is delivered by Autodesk's live streamer endpoint. Deploying this or any older version will update the endpoint to Autodesk's currently available Fusion build, not necessarily this historical build. Only the latest Autodesk-served Fusion build is installable through this package.",
+  "release_date": "2026-04-30",
+  "security_severity": "Unspecified",
+  "silent_install_switches": "",
+  "success_exit_codes": "0",
+  "reboot_exit_codes": "",
+  "install_type": "exe",
+  "update_type": "Regular Updates",
+  "os": [
+    "Windows 10",
+    "Windows 11"
+  ],
+  "file_name": {
+    "Windows_64": {
+      "type": "cloud",
+      "name": "FusionManagedUpdater.cmd"
+    }
+  }
+}
+```
+
+`PLACEHOLDER_FUSION_PACKAGE_ID` in the dry-run path must be replaced with the created Action1 package ID before live version creation.
+
+## Live Write Preconditions
+
+Before any live Action1 write:
+
+1. Rerun the match-conflict check successfully through the Action1 connector, direct Action1 API, or Action1 UI.
+2. Create or identify the real Action1 package ID for `Autodesk Fusion Managed Updater`.
+3. Replace `PLACEHOLDER_FUSION_PACKAGE_ID` with the real package ID.
+4. Rerun package and version creation dry-runs.
+5. Confirm the generated payload is current and under 1 MB.
+6. Proceed with live writes only after the above gates pass.
