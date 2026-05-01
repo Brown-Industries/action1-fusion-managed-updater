@@ -232,6 +232,21 @@ Assert-Equal $scheduledConfig.OneShot $false 'Container config supports long-run
 Assert-Equal $scheduledConfig.CheckFrequencyCron '0 */6 * * *' 'Container config reads cron schedule'
 Assert-Equal $scheduledConfig.CheckFrequencyMinutes 30 'Container config reads interval schedule'
 
+$intervalCommand = New-FusionContainerScheduleCommand -Config ([pscustomobject]@{
+    CheckFrequencyCron = ''
+    CheckFrequencyMinutes = 1440
+}) -SyncScriptPath '/app/src/Invoke-FusionAction1RepositorySync.ps1'
+Assert-Equal $intervalCommand.Kind 'Interval' 'Schedule command defaults to interval mode'
+Assert-Equal $intervalCommand.Seconds 86400 'Schedule command converts minutes to seconds'
+
+$cronCommand = New-FusionContainerScheduleCommand -Config ([pscustomobject]@{
+    CheckFrequencyCron = '0 */6 * * *'
+    CheckFrequencyMinutes = 1440
+}) -SyncScriptPath '/app/src/Invoke-FusionAction1RepositorySync.ps1'
+Assert-Equal $cronCommand.Kind 'Cron' 'Schedule command prefers cron mode'
+Assert-Equal $cronCommand.Expression '0 */6 * * *' 'Schedule command preserves cron expression'
+Assert-True ($cronCommand.Command -like '*Invoke-FusionAction1RepositorySync.ps1*') 'Schedule command includes sync script'
+
 Assert-ThrowsLike {
     Get-FusionContainerRuntimeConfig -Environment @{ ACTION1_CLIENT_ID = 'client-id' }
 } '*ACTION1_CLIENT_SECRET*' 'Container config requires Action1 client secret'

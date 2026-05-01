@@ -169,6 +169,28 @@ function Get-FusionContainerRuntimeConfig {
     }
 }
 
+function New-FusionContainerScheduleCommand {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)][string]$SyncScriptPath
+    )
+
+    $command = "pwsh -NoProfile -ExecutionPolicy Bypass -File `"$SyncScriptPath`""
+    if (-not [string]::IsNullOrWhiteSpace([string]$Config.CheckFrequencyCron)) {
+        return [pscustomobject]@{
+            Kind       = 'Cron'
+            Expression = [string]$Config.CheckFrequencyCron
+            Command    = $command
+        }
+    }
+
+    return [pscustomobject]@{
+        Kind    = 'Interval'
+        Seconds = [int]$Config.CheckFrequencyMinutes * 60
+        Command = $command
+    }
+}
+
 function New-Action1FusionPackageBody {
     param([Parameter(Mandatory = $true)][string]$PackageName)
 
@@ -457,4 +479,4 @@ function Get-FusionBlockingProcesses {
     return $Processes | Where-Object { $names -contains $_.ProcessName }
 }
 
-Export-ModuleMember -Function ConvertTo-FusionVersionParts, Compare-FusionVersion, Read-FusionInfoFile, Get-HighestFusionInventoryVersion, New-HistoricalVersionWarning, New-Action1FusionVersionBody, Get-FusionContainerRuntimeConfig, New-Action1FusionPackageBody, Test-AutodeskHeadChanged, New-FusionWatcherDryRunResult, Assert-FusionWatcherLiveBuildVersion, Resolve-FusionWatcherBuildVersion, Test-Action1PackageVersionContainerPresent, Get-Action1PackageVersionRecords, Get-Action1PackageVersionValues, Test-Action1PackageHasVersion, Get-Action1PackageVersionRecord, Test-Action1PackageVersionHasWindowsBinary, Assert-FusionWatcherNewBuildNotAlreadyRecorded, Write-FusionWatcherState, Get-AutodeskInstallerHead, ConvertFrom-AutodeskInstallerHeadRecord, Get-LatestFusionStreamer, Get-FusionBlockingProcesses
+Export-ModuleMember -Function ConvertTo-FusionVersionParts, Compare-FusionVersion, Read-FusionInfoFile, Get-HighestFusionInventoryVersion, New-HistoricalVersionWarning, New-Action1FusionVersionBody, Get-FusionContainerRuntimeConfig, New-FusionContainerScheduleCommand, New-Action1FusionPackageBody, Test-AutodeskHeadChanged, New-FusionWatcherDryRunResult, Assert-FusionWatcherLiveBuildVersion, Resolve-FusionWatcherBuildVersion, Test-Action1PackageVersionContainerPresent, Get-Action1PackageVersionRecords, Get-Action1PackageVersionValues, Test-Action1PackageHasVersion, Get-Action1PackageVersionRecord, Test-Action1PackageVersionHasWindowsBinary, Assert-FusionWatcherNewBuildNotAlreadyRecorded, Write-FusionWatcherState, Get-AutodeskInstallerHead, ConvertFrom-AutodeskInstallerHeadRecord, Get-LatestFusionStreamer, Get-FusionBlockingProcesses
