@@ -94,7 +94,7 @@ function New-Action1FusionVersionBody {
         app_name_match          = '^Autodesk Fusion(?: 360)?$'
         release_date            = $DetectedDate
         security_severity       = 'Unspecified'
-        silent_install_switches = ''
+        silent_install_switches = $PayloadFileName
         success_exit_codes      = '0'
         reboot_exit_codes       = ''
         install_type            = 'other'
