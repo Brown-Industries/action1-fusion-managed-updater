@@ -82,9 +82,11 @@ Version dry-run request body:
 
 Before any live Action1 write:
 
-1. Rerun the match-conflict check successfully through the Action1 connector, direct Action1 API, or Action1 UI.
+1. Rerun the match-conflict check through the Action1 connector, direct Action1 API, or Action1 UI and confirm the result has no blocking or conflicting package matches.
 2. Create or identify the real Action1 package ID for `Autodesk Fusion Managed Updater`.
 3. Replace `PLACEHOLDER_FUSION_PACKAGE_ID` with the real package ID.
-4. Rerun package and version creation dry-runs.
+4. Rerun package and version creation dry-runs and confirm both complete without validation errors.
 5. Confirm the generated payload is current and under 1 MB.
-6. Proceed with live writes only after the above gates pass.
+6. Confirm the accepted version body still matches the documented shape and retains the historical-version warning in `description` or `internal_notes`.
+7. Record the final match-conflict result and dry-run previews in this file.
+8. Proceed with live writes only after the above gates pass.
