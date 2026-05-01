@@ -20,7 +20,7 @@ Output:
 dist\FusionManagedUpdater.cmd
 ```
 
-The generated payload is ignored by git by default.
+The generated payload is ignored by git by default. `dist/.gitkeep` is tracked only to keep the output directory present.
 
 ## Run Tests
 
@@ -29,9 +29,9 @@ Command:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\run-tests.ps1
 ```
 
-## Endpoint Dry Run
+## Endpoint Lab Update Test
 
-Run this only on a lab machine with all-users Fusion installed:
+This performs a real Autodesk streamer update on the machine. Run it only on a lab machine with all-users Fusion installed:
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\src\Invoke-FusionManagedUpdate.ps1 -RunningProcessPolicy Fail
 ```
@@ -54,14 +54,16 @@ $env:ACTION1_FUSION_PACKAGE_ID='<Action1 package id>'
 
 Live watcher runs also require `FUSION_OBSERVED_BUILD_VERSION` to be set to a real dotted numeric Fusion build version, such as `2702.1.58`.
 
-Live Action1 writes are blocked until the match-conflict check returns no blocking or conflicting package matches.
+Do not run live watcher mode until the manual gates in `action1/validation-notes.md` are complete. The script enforces build version, package ID, and token checks; it does not enforce the Action1 match-conflict gate by itself.
 
 ## Recommended Deployment
 
 1. Run tests.
 2. Build `dist\FusionManagedUpdater.cmd`.
 3. Run watcher dry-run.
-4. Validate Action1 package/version dry-runs.
-5. Deploy to one pilot endpoint.
-6. Refresh Action1 installed software inventory.
-7. Approve broader deployment.
+4. Complete the live-write preconditions in `action1/validation-notes.md`, including a successful match-conflict result with no blocking or conflicting package matches.
+5. Validate Action1 package/version dry-runs.
+6. Record the final conflict-check result and dry-run previews in `action1/validation-notes.md`.
+7. Deploy to one pilot endpoint.
+8. Refresh Action1 installed software inventory.
+9. Approve broader deployment.
