@@ -38,6 +38,79 @@ Command:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\run-tests.ps1
 ```
 
+## Container Usage
+
+The intended public image is:
+
+```text
+brownindustries/action1-fusion-managed-updater:latest
+```
+
+The container is stateless. It queries Action1 each run, finds or creates the package named by `PACKAGE_NAME`, detects the highest Autodesk Fusion build reported in Action1 installed software inventory, then creates or completes the corresponding Action1 package version with the generated Windows updater payload.
+
+One-shot mode is the default:
+
+```bash
+docker run --rm \
+  -e ACTION1_CLIENT_ID="..." \
+  -e ACTION1_CLIENT_SECRET="..." \
+  -e ACTION1_ORG_ID="all" \
+  -e PACKAGE_NAME="Autodesk Fusion Managed Updater" \
+  brownindustries/action1-fusion-managed-updater:latest
+```
+
+Long-running mode starts once immediately, then checks on an interval or cron schedule:
+
+```bash
+docker run -d --name action1-fusion-updater \
+  -e ACTION1_CLIENT_ID="..." \
+  -e ACTION1_CLIENT_SECRET="..." \
+  -e ONE_SHOT="false" \
+  -e CHECK_FREQUENCY_MINUTES="1440" \
+  brownindustries/action1-fusion-managed-updater:latest
+```
+
+`CHECK_FREQUENCY_CRON` can be used instead of `CHECK_FREQUENCY_MINUTES` for standard five-field cron expressions.
+
+Supported environment variables:
+
+| Name | Required | Default | Purpose |
+| --- | --- | --- | --- |
+| `ACTION1_CLIENT_ID` | yes | none | Action1 API client ID. |
+| `ACTION1_CLIENT_SECRET` | yes | none | Action1 API client secret. |
+| `ACTION1_BASE_URL` | no | `https://app.action1.com/api/3.0` | Action1 API base URL. |
+| `ACTION1_ORG_ID` | no | `all` | Action1 organization scope. |
+| `PACKAGE_NAME` | no | `Autodesk Fusion Managed Updater` | Custom Action1 package name to find or create. |
+| `ONE_SHOT` | no | `true` | `true` exits after one sync; `false` keeps scheduling sync runs. |
+| `CHECK_FREQUENCY_MINUTES` | no | `1440` | Interval used when `ONE_SHOT=false` and no cron is set. |
+| `CHECK_FREQUENCY_CRON` | no | none | Cron schedule used when `ONE_SHOT=false`. |
+
+The example Compose file keeps both remote-image and local-build paths available:
+
+```bash
+docker compose -f docker-compose.example.yml up --build
+```
+
+## Public Image Publishing
+
+`.github/workflows/docker-publish.yml` builds and publishes the container image to Docker Hub as `brownindustries/action1-fusion-managed-updater`.
+
+Publishing events:
+
+- Pull requests build the image but do not log in to Docker Hub and do not push.
+- Pushes to the repository default branch publish `latest`, branch, and `sha-*` tags.
+- `v*` tag pushes publish the matching version tag and `sha-*` tag.
+- Manual workflow runs publish only when run from the default branch or a `v*` tag; other refs build only.
+
+Required GitHub repository secrets:
+
+```text
+DOCKERHUB_USERNAME
+DOCKERHUB_TOKEN
+```
+
+The GitHub repository should be public under the `Brown-Industries` organization, and the Docker Hub namespace/repository should be `brownindustries/action1-fusion-managed-updater`.
+
 ## Endpoint Lab Update Test
 
 This performs a real Autodesk streamer update on the machine. Run it only on a lab machine with all-users Fusion installed:
