@@ -312,6 +312,16 @@ $versionRecord = Get-Action1PackageVersionRecord -Package $packageWithBinary -Bu
 Assert-Equal $versionRecord.id 'version-1' 'Version record helper returns matching version record'
 Assert-True (Test-Action1PackageVersionHasWindowsBinary -VersionRecord $versionRecord) 'Version binary helper detects Windows binary'
 
+$packageWithFieldVersion = [pscustomobject]@{
+    versions = [pscustomobject]@{
+        items = @(
+            [pscustomobject]@{ id = 'field-version-1'; fields = [pscustomobject]@{ Version = '2702.1.58' } }
+        )
+    }
+}
+$fieldVersionRecord = Get-Action1PackageVersionRecord -Package $packageWithFieldVersion -BuildVersion '2702.1.58'
+Assert-Equal $fieldVersionRecord.id 'field-version-1' 'Version record helper reads fields Version fallback'
+
 $packageWithoutBinary = [pscustomobject]@{
     versions = @(
         [pscustomobject]@{ id = 'version-1'; version = '2702.1.58' }
@@ -319,6 +329,16 @@ $packageWithoutBinary = [pscustomobject]@{
 }
 $missingBinaryRecord = Get-Action1PackageVersionRecord -Package $packageWithoutBinary -BuildVersion '2702.1.58'
 Assert-True (-not (Test-Action1PackageVersionHasWindowsBinary -VersionRecord $missingBinaryRecord)) 'Version binary helper reports missing Windows binary'
+
+$previousErrorActionPreference = $ErrorActionPreference
+$ErrorActionPreference = 'Stop'
+try {
+    $nullBinaryRecord = [pscustomobject]@{ version = '2702.1.58'; binary_id = $null }
+    Assert-True (-not (Test-Action1PackageVersionHasWindowsBinary -VersionRecord $nullBinaryRecord)) 'Version binary helper handles null binary id without error'
+}
+finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+}
 Assert-ThrowsLike { Assert-FusionWatcherNewBuildNotAlreadyRecorded -Package $packageWithVersions -BuildVersion '2702.1.58' } '*already has Fusion version 2702.1.58*' 'Fusion watcher duplicate guard rejects changed release signal with existing inventory build'
 Assert-Equal (Assert-FusionWatcherNewBuildNotAlreadyRecorded -Package $packageWithVersions -BuildVersion '2702.1.99') '2702.1.99' 'Fusion watcher duplicate guard allows new inventory build'
 

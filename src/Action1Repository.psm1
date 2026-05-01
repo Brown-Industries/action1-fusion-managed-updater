@@ -1,5 +1,5 @@
 $commonModulePath = Join-Path $PSScriptRoot 'FusionManagedUpdate.Common.psm1'
-Import-Module $commonModulePath -Force -Global
+Import-Module $commonModulePath
 
 function ConvertTo-Action1FormValue {
     param([string]$Value)

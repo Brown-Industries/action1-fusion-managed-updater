@@ -349,9 +349,20 @@ function Get-Action1PackageVersionRecord {
     )
 
     foreach ($record in (Get-Action1PackageVersionRecords -Package $Package)) {
+        if ($null -eq $record) {
+            continue
+        }
         $versionProperty = $record.PSObject.Properties['version']
         if ($versionProperty -and ([string]$versionProperty.Value) -eq $BuildVersion) {
             return $record
+        }
+
+        $fieldsProperty = $record.PSObject.Properties['fields']
+        if ($fieldsProperty) {
+            $fieldVersion = $fieldsProperty.Value.PSObject.Properties['Version']
+            if ($fieldVersion -and ([string]$fieldVersion.Value) -eq $BuildVersion) {
+                return $record
+            }
         }
     }
     return $null
@@ -363,6 +374,7 @@ function Test-Action1PackageVersionHasWindowsBinary {
     if ($null -eq $VersionRecord) { return $false }
     $binaryProperty = $VersionRecord.PSObject.Properties['binary_id']
     if (-not $binaryProperty) { return $false }
+    if ($null -eq $binaryProperty.Value) { return $false }
     $windowsBinary = $binaryProperty.Value.PSObject.Properties['Windows_64']
     return $windowsBinary -and -not [string]::IsNullOrWhiteSpace([string]$windowsBinary.Value)
 }
