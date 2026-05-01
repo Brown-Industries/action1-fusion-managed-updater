@@ -266,6 +266,15 @@ Assert-Equal $packageBody.platform 'Windows' 'Package body targets Windows'
 Assert-True ($packageBody.description -like '*Historical versions are release records only*') 'Package body warns about historical records'
 Assert-True ($packageBody.internal_notes -like '*Do not use this package for rollback*') 'Package body warns against rollback'
 
+$uploadHeaders = New-Action1UploadInitHeaders -AccessToken 'token' -PayloadLength 123
+Assert-Equal $uploadHeaders.Authorization 'Bearer token' 'Upload init includes bearer token'
+Assert-Equal $uploadHeaders.'X-Upload-Content-Type' 'application/octet-stream' 'Upload init sets content type header'
+Assert-Equal $uploadHeaders.'X-Upload-Content-Length' '123' 'Upload init sets content length header'
+
+$putHeaders = New-Action1UploadPutHeaders -AccessToken 'token' -PayloadLength 123
+Assert-Equal $putHeaders.Authorization 'Bearer token' 'Upload PUT includes bearer token'
+Assert-Equal $putHeaders.'Content-Range' 'bytes 0-122/123' 'Upload PUT sets content range'
+
 $unchangedDryRun = New-FusionWatcherDryRunResult -State $autodeskHead -AutodeskHead $autodeskHead -BuildVersion '2702.1.58' -DetectedDate '2026-04-30' -PayloadFileName 'FusionManagedUpdater.cmd'
 Assert-Equal $unchangedDryRun.Changed $false 'Fusion watcher dry-run result reports unchanged installer state'
 Assert-Equal $unchangedDryRun.AutodeskHead.ETag $autodeskHead.ETag 'Fusion watcher dry-run result includes Autodesk HEAD when unchanged'
@@ -339,6 +348,20 @@ try {
 finally {
     $ErrorActionPreference = $previousErrorActionPreference
 }
+
+$recordedWithBinary = [pscustomobject]@{
+    versions = @([pscustomobject]@{ id = 'version-1'; version = '2702.1.58'; binary_id = [pscustomobject]@{ Windows_64 = 'binary-1' } })
+}
+Assert-Equal (Resolve-Action1VersionSyncAction -Package $recordedWithBinary -BuildVersion '2702.1.58') 'NoOp' 'Version sync no-ops when binary exists'
+
+$recordedWithoutBinary = [pscustomobject]@{
+    versions = @([pscustomobject]@{ id = 'version-1'; version = '2702.1.58' })
+}
+Assert-Equal (Resolve-Action1VersionSyncAction -Package $recordedWithoutBinary -BuildVersion '2702.1.58') 'UploadMissingBinary' 'Version sync repairs missing binary'
+
+$missingVersionPackage = [pscustomobject]@{ versions = @() }
+Assert-Equal (Resolve-Action1VersionSyncAction -Package $missingVersionPackage -BuildVersion '2702.1.58') 'CreateAndUpload' 'Version sync creates missing version'
+
 Assert-ThrowsLike { Assert-FusionWatcherNewBuildNotAlreadyRecorded -Package $packageWithVersions -BuildVersion '2702.1.58' } '*already has Fusion version 2702.1.58*' 'Fusion watcher duplicate guard rejects changed release signal with existing inventory build'
 Assert-Equal (Assert-FusionWatcherNewBuildNotAlreadyRecorded -Package $packageWithVersions -BuildVersion '2702.1.99') '2702.1.99' 'Fusion watcher duplicate guard allows new inventory build'
 

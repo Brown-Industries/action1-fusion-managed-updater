@@ -101,4 +101,74 @@ function Ensure-Action1PackageByName {
     return Invoke-Action1RequestCommand -RequestCommand $RequestCommand -Method 'POST' -Path "/software-repository/$OrgId" -Body (New-Action1FusionPackageBody -PackageName $PackageName) -BaseUrl $BaseUrl -AccessToken $AccessToken
 }
 
-Export-ModuleMember -Function New-Action1TokenRequestBody, Select-Action1PackageByExactName, Get-Action1AccessToken, Invoke-Action1JsonApi, Ensure-Action1PackageByName
+function New-Action1UploadInitHeaders {
+    param(
+        [Parameter(Mandatory = $true)][string]$AccessToken,
+        [Parameter(Mandatory = $true)][long]$PayloadLength
+    )
+
+    @{
+        Authorization             = "Bearer $AccessToken"
+        'X-Upload-Content-Type'   = 'application/octet-stream'
+        'X-Upload-Content-Length' = [string]$PayloadLength
+    }
+}
+
+function New-Action1UploadPutHeaders {
+    param(
+        [Parameter(Mandatory = $true)][string]$AccessToken,
+        [Parameter(Mandatory = $true)][long]$PayloadLength
+    )
+
+    @{
+        Authorization   = "Bearer $AccessToken"
+        'Content-Range' = "bytes 0-$($PayloadLength - 1)/$PayloadLength"
+    }
+}
+
+function Resolve-Action1VersionSyncAction {
+    param(
+        [Parameter(Mandatory = $true)]$Package,
+        [Parameter(Mandatory = $true)][string]$BuildVersion
+    )
+
+    $record = Get-Action1PackageVersionRecord -Package $Package -BuildVersion $BuildVersion
+    if ($null -eq $record) { return 'CreateAndUpload' }
+    if (Test-Action1PackageVersionHasWindowsBinary -VersionRecord $record) { return 'NoOp' }
+    return 'UploadMissingBinary'
+}
+
+function New-Action1RepositoryVersion {
+    param(
+        [Parameter(Mandatory = $true)][string]$BaseUrl,
+        [Parameter(Mandatory = $true)][string]$OrgId,
+        [Parameter(Mandatory = $true)][string]$PackageId,
+        [Parameter(Mandatory = $true)][string]$AccessToken,
+        [Parameter(Mandatory = $true)]$Body
+    )
+
+    return Invoke-Action1JsonApi -Method 'POST' -BaseUrl $BaseUrl -AccessToken $AccessToken -Path "/software-repository/$OrgId/$PackageId/versions" -Body $Body
+}
+
+function Send-Action1VersionPayload {
+    param(
+        [Parameter(Mandatory = $true)][string]$BaseUrl,
+        [Parameter(Mandatory = $true)][string]$OrgId,
+        [Parameter(Mandatory = $true)][string]$PackageId,
+        [Parameter(Mandatory = $true)][string]$VersionId,
+        [Parameter(Mandatory = $true)][string]$AccessToken,
+        [Parameter(Mandatory = $true)][string]$PayloadPath
+    )
+
+    $payloadBytes = [IO.File]::ReadAllBytes($PayloadPath)
+    $initUri = "$($BaseUrl.TrimEnd('/'))/software-repository/$OrgId/$PackageId/versions/$VersionId/upload?platform=Windows_64"
+    $initResponse = Invoke-WebRequest -Method Post -Uri $initUri -Headers (New-Action1UploadInitHeaders -AccessToken $AccessToken -PayloadLength $payloadBytes.Length) -ContentType 'application/json' -Body '{}' -SkipHttpErrorCheck
+    $uploadLocation = [string]($initResponse.Headers['X-Upload-Location'] | Select-Object -First 1)
+    if ([string]::IsNullOrWhiteSpace($uploadLocation)) {
+        throw 'Action1 upload initialization did not return X-Upload-Location.'
+    }
+
+    Invoke-WebRequest -Method Put -Uri $uploadLocation -Headers (New-Action1UploadPutHeaders -AccessToken $AccessToken -PayloadLength $payloadBytes.Length) -ContentType 'application/octet-stream' -Body $payloadBytes | Out-Null
+}
+
+Export-ModuleMember -Function New-Action1TokenRequestBody, Select-Action1PackageByExactName, Get-Action1AccessToken, Invoke-Action1JsonApi, Ensure-Action1PackageByName, New-Action1UploadInitHeaders, New-Action1UploadPutHeaders, Resolve-Action1VersionSyncAction, New-Action1RepositoryVersion, Send-Action1VersionPayload
