@@ -82,19 +82,31 @@ function New-HistoricalVersionWarning {
     return "This version records Autodesk Fusion build $BuildVersion as detected on $DetectedDate. Fusion is delivered by Autodesk's live streamer endpoint. Deploying this or any older version will update the endpoint to Autodesk's currently available Fusion build, not necessarily this historical build. Only the latest Autodesk-served Fusion build is installable through this package."
 }
 
+function New-FusionWatcherReleaseSignalFingerprint {
+    param([Parameter(Mandatory = $true)]$AutodeskHead)
+
+    return "FusionManagedUpdaterReleaseSignal Url=$($AutodeskHead.Url); LastModified=$($AutodeskHead.LastModified); ETag=$($AutodeskHead.ETag); ContentLength=$($AutodeskHead.ContentLength)"
+}
+
 function New-Action1FusionVersionBody {
     param(
         [Parameter(Mandatory = $true)][string]$BuildVersion,
         [Parameter(Mandatory = $true)][string]$DetectedDate,
-        [Parameter(Mandatory = $true)][string]$PayloadFileName
+        [Parameter(Mandatory = $true)][string]$PayloadFileName,
+        $AutodeskHead = $null
     )
 
     $description = New-HistoricalVersionWarning -BuildVersion $BuildVersion -DetectedDate $DetectedDate
+    $internalNotes = $description
+    if ($null -ne $AutodeskHead) {
+        $internalNotes = "$description`n$(New-FusionWatcherReleaseSignalFingerprint -AutodeskHead $AutodeskHead)"
+    }
+
     [ordered]@{
         version                 = $BuildVersion
         app_name_match          = '^Autodesk Fusion(?: 360)?$'
         description             = $description
-        internal_notes          = $description
+        internal_notes          = $internalNotes
         release_date            = $DetectedDate
         security_severity       = 'Unspecified'
         silent_install_switches = ''
@@ -128,7 +140,7 @@ function New-FusionWatcherDryRunResult {
     [pscustomobject]@{
         Changed            = Test-AutodeskHeadChanged -State $State -AutodeskHead $AutodeskHead
         AutodeskHead       = $AutodeskHead
-        Action1VersionBody = New-Action1FusionVersionBody -BuildVersion $BuildVersion -DetectedDate $DetectedDate -PayloadFileName $PayloadFileName
+        Action1VersionBody = New-Action1FusionVersionBody -BuildVersion $BuildVersion -DetectedDate $DetectedDate -PayloadFileName $PayloadFileName -AutodeskHead $AutodeskHead
     }
 }
 
@@ -183,7 +195,7 @@ function Test-Action1PackageVersionContainerPresent {
     return $null -ne $Package.PSObject.Properties['versions']
 }
 
-function Get-Action1PackageVersionValues {
+function Get-Action1PackageVersionRecords {
     param([Parameter(Mandatory = $true)]$Package)
 
     $containers = @()
@@ -194,7 +206,7 @@ function Get-Action1PackageVersionValues {
         }
     }
 
-    $items = @()
+    $records = @()
     foreach ($container in $containers) {
         if ($null -eq $container) {
             continue
@@ -210,15 +222,21 @@ function Get-Action1PackageVersionValues {
         }
 
         if ($null -ne $nestedItems) {
-            $items += @($nestedItems)
+            $records += @($nestedItems)
         }
         else {
-            $items += @($container)
+            $records += @($container)
         }
     }
 
+    return $records
+}
+
+function Get-Action1PackageVersionValues {
+    param([Parameter(Mandatory = $true)]$Package)
+
     $versions = @()
-    foreach ($item in $items) {
+    foreach ($item in (Get-Action1PackageVersionRecords -Package $Package)) {
         if ($null -eq $item) {
             continue
         }
@@ -262,17 +280,60 @@ function Test-Action1PackageHasVersion {
     return $versions -contains $BuildVersion
 }
 
-function Assert-FusionWatcherNewBuildNotAlreadyRecorded {
+function Test-Action1PackageVersionRecordHasReleaseSignal {
     param(
-        [Parameter(Mandatory = $true)]$Package,
-        [Parameter(Mandatory = $true)][string]$BuildVersion
+        [Parameter(Mandatory = $true)]$Record,
+        [Parameter(Mandatory = $true)][string]$ReleaseSignalFingerprint
     )
 
-    if (Test-Action1PackageHasVersion -Package $Package -BuildVersion $BuildVersion) {
-        throw "Action1 package already has Fusion version $BuildVersion. The Autodesk release signal changed, but Action1 inventory resolved to an already recorded build. Refresh Action1 inventory and rerun; watcher state was not updated."
+    $candidateText = @()
+    foreach ($propertyName in @('internal_notes', 'internalNotes', 'description', 'notes')) {
+        $property = $Record.PSObject.Properties[$propertyName]
+        if ($property -and -not [string]::IsNullOrWhiteSpace([string]$property.Value)) {
+            $candidateText += [string]$property.Value
+        }
     }
 
-    return $BuildVersion
+    $fieldsProperty = $Record.PSObject.Properties['fields']
+    if ($fieldsProperty) {
+        foreach ($fieldPropertyName in @('internal_notes', 'internalNotes', 'Description', 'description', 'Notes', 'notes')) {
+            $fieldProperty = $fieldsProperty.Value.PSObject.Properties[$fieldPropertyName]
+            if ($fieldProperty -and -not [string]::IsNullOrWhiteSpace([string]$fieldProperty.Value)) {
+                $candidateText += [string]$fieldProperty.Value
+            }
+        }
+    }
+
+    return (($candidateText -join "`n") -like "*$ReleaseSignalFingerprint*")
+}
+
+function Resolve-FusionWatcherPackageVersionAction {
+    param(
+        [Parameter(Mandatory = $true)]$Package,
+        [Parameter(Mandatory = $true)][string]$BuildVersion,
+        [Parameter(Mandatory = $true)]$AutodeskHead
+    )
+
+    $releaseSignalFingerprint = New-FusionWatcherReleaseSignalFingerprint -AutodeskHead $AutodeskHead
+    $matchingRecords = @()
+    foreach ($record in (Get-Action1PackageVersionRecords -Package $Package)) {
+        $recordPackage = [pscustomobject]@{ versions = [pscustomobject]@{ items = @($record) } }
+        if (Test-Action1PackageHasVersion -Package $recordPackage -BuildVersion $BuildVersion) {
+            $matchingRecords += $record
+        }
+    }
+
+    if ($matchingRecords.Count -eq 0) {
+        return 'Create'
+    }
+
+    foreach ($record in $matchingRecords) {
+        if (Test-Action1PackageVersionRecordHasReleaseSignal -Record $record -ReleaseSignalFingerprint $releaseSignalFingerprint) {
+            return 'AdoptState'
+        }
+    }
+
+    throw "Action1 package already has Fusion version $BuildVersion, but it does not include the Autodesk release signal fingerprint for this watcher run. Refresh Action1 inventory and rerun; watcher state was not updated."
 }
 
 function Write-FusionWatcherState {
@@ -340,4 +401,4 @@ function Get-FusionBlockingProcesses {
     return $Processes | Where-Object { $names -contains $_.ProcessName }
 }
 
-Export-ModuleMember -Function ConvertTo-FusionVersionParts, Compare-FusionVersion, Read-FusionInfoFile, Get-HighestFusionInventoryVersion, New-HistoricalVersionWarning, New-Action1FusionVersionBody, Test-AutodeskHeadChanged, New-FusionWatcherDryRunResult, Assert-FusionWatcherLiveBuildVersion, Resolve-FusionWatcherBuildVersion, Test-Action1PackageVersionContainerPresent, Get-Action1PackageVersionValues, Test-Action1PackageHasVersion, Assert-FusionWatcherNewBuildNotAlreadyRecorded, Write-FusionWatcherState, Get-AutodeskInstallerHead, ConvertFrom-AutodeskInstallerHeadRecord, Get-LatestFusionStreamer, Get-FusionBlockingProcesses
+Export-ModuleMember -Function ConvertTo-FusionVersionParts, Compare-FusionVersion, Read-FusionInfoFile, Get-HighestFusionInventoryVersion, New-HistoricalVersionWarning, New-FusionWatcherReleaseSignalFingerprint, New-Action1FusionVersionBody, Test-AutodeskHeadChanged, New-FusionWatcherDryRunResult, Assert-FusionWatcherLiveBuildVersion, Resolve-FusionWatcherBuildVersion, Test-Action1PackageVersionContainerPresent, Get-Action1PackageVersionRecords, Get-Action1PackageVersionValues, Test-Action1PackageHasVersion, Test-Action1PackageVersionRecordHasReleaseSignal, Resolve-FusionWatcherPackageVersionAction, Write-FusionWatcherState, Get-AutodeskInstallerHead, ConvertFrom-AutodeskInstallerHeadRecord, Get-LatestFusionStreamer, Get-FusionBlockingProcesses

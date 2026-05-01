@@ -88,11 +88,11 @@ Before any live Action1 write:
 4. Rerun package and version creation dry-runs and confirm both complete without validation errors.
 5. Confirm the generated payload is current and under 1 MB.
 6. Refresh Action1 installed software inventory and confirm `Autodesk Fusion` or `Autodesk Fusion 360` reports the build you want to record.
-7. Confirm the package details response includes `fields=versions`; the watcher uses that response to reject duplicate version creation without advancing state.
-8. Confirm the accepted version body still matches the documented shape and retains the historical-version warning in `description` or `internal_notes`.
+7. Confirm the package details response includes `fields=versions`; the watcher uses that response to reject duplicate version creation without advancing state unless the existing version has the same Autodesk release-signal fingerprint.
+8. Confirm the accepted version body still matches the documented shape and retains the historical-version warning in `description` or `internal_notes`. Live watcher-created versions also append a `FusionManagedUpdaterReleaseSignal` fingerprint to `internal_notes` for idempotent retry recovery.
 9. Record the final match-conflict result and dry-run previews in this file.
 10. Proceed with live writes only after the above gates pass.
 
 `FUSION_OBSERVED_BUILD_VERSION` is optional for live watcher runs. If set, it must match the highest Action1 inventory version unless the watcher is run with `-AllowManualObservedBuild`. Use that override only for a documented manual observation, such as a lab endpoint queried directly before Action1 inventory refresh.
 
-If the watcher reports that the resolved build already exists in the Action1 package after an Autodesk release signal changed, refresh Action1 installed software inventory and rerun. The watcher intentionally leaves state unchanged in that case.
+If the watcher reports that the resolved build already exists in the Action1 package after an Autodesk release signal changed, refresh Action1 installed software inventory and rerun. The watcher intentionally leaves state unchanged unless the existing Action1 version carries the same release-signal fingerprint as the current Autodesk HEAD.

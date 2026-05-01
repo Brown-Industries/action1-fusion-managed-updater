@@ -141,6 +141,12 @@ Assert-True ($versionBody.description -eq $versionDescription) 'Action1 version 
 Assert-Equal $versionBody.silent_install_switches '' 'Action1 payload launcher needs no switches'
 Assert-Equal $versionBody.success_exit_codes '0' 'Action1 success exit code is zero'
 
+$releaseSignalFingerprint = New-FusionWatcherReleaseSignalFingerprint -AutodeskHead $autodeskHead
+Assert-True ($releaseSignalFingerprint -like '*FusionManagedUpdaterReleaseSignal*') 'Fusion watcher release signal fingerprint includes marker'
+Assert-True ($releaseSignalFingerprint -like '*ContentLength=1486420912*') 'Fusion watcher release signal fingerprint includes content length'
+$versionBodyWithHead = New-Action1FusionVersionBody -BuildVersion '2702.1.58' -DetectedDate '2026-04-30' -PayloadFileName 'FusionManagedUpdater.cmd' -AutodeskHead $autodeskHead
+Assert-True ($versionBodyWithHead.internal_notes -like "*$releaseSignalFingerprint*") 'Action1 version body includes release signal fingerprint in internal notes'
+
 $unchangedDryRun = New-FusionWatcherDryRunResult -State $autodeskHead -AutodeskHead $autodeskHead -BuildVersion '2702.1.58' -DetectedDate '2026-04-30' -PayloadFileName 'FusionManagedUpdater.cmd'
 Assert-Equal $unchangedDryRun.Changed $false 'Fusion watcher dry-run result reports unchanged installer state'
 Assert-Equal $unchangedDryRun.AutodeskHead.ETag $autodeskHead.ETag 'Fusion watcher dry-run result includes Autodesk HEAD when unchanged'
@@ -174,8 +180,17 @@ $packageVersions = @(Get-Action1PackageVersionValues -Package $packageWithVersio
 Assert-Equal ($packageVersions -join ',') '2702.1.47,2702.1.58' 'Action1 package version helper reads version container'
 Assert-True (Test-Action1PackageHasVersion -Package $packageWithVersions -BuildVersion '2702.1.58') 'Action1 package version helper detects existing build version'
 Assert-True (-not (Test-Action1PackageHasVersion -Package $packageWithVersions -BuildVersion '2702.1.99')) 'Action1 package version helper reports missing build version'
-Assert-ThrowsLike { Assert-FusionWatcherNewBuildNotAlreadyRecorded -Package $packageWithVersions -BuildVersion '2702.1.58' } '*already has Fusion version 2702.1.58*' 'Fusion watcher duplicate guard rejects changed release signal with existing inventory build'
-Assert-Equal (Assert-FusionWatcherNewBuildNotAlreadyRecorded -Package $packageWithVersions -BuildVersion '2702.1.99') '2702.1.99' 'Fusion watcher duplicate guard allows new inventory build'
+Assert-ThrowsLike { Resolve-FusionWatcherPackageVersionAction -Package $packageWithVersions -BuildVersion '2702.1.58' -AutodeskHead $autodeskHead } '*already has Fusion version 2702.1.58*' 'Fusion watcher duplicate guard rejects changed release signal with existing inventory build'
+Assert-Equal (Resolve-FusionWatcherPackageVersionAction -Package $packageWithVersions -BuildVersion '2702.1.99' -AutodeskHead $autodeskHead) 'Create' 'Fusion watcher duplicate guard allows new inventory build'
+
+$packageWithMatchingSignalVersion = [pscustomobject]@{
+    versions = [pscustomobject]@{
+        items = @(
+            [pscustomobject]@{ version = '2702.1.58'; internal_notes = "Recorded by test. $releaseSignalFingerprint" }
+        )
+    }
+}
+Assert-Equal (Resolve-FusionWatcherPackageVersionAction -Package $packageWithMatchingSignalVersion -BuildVersion '2702.1.58' -AutodeskHead $autodeskHead) 'AdoptState' 'Fusion watcher duplicate guard adopts state when release signal fingerprint matches existing version'
 
 $watcherLiveTempRoot = Join-Path $env:TEMP ('fmu-watcher-live-test-' + [guid]::NewGuid().ToString('N'))
 $watcherStatePath = Join-Path $watcherLiveTempRoot 'state.json'
@@ -211,7 +226,30 @@ try {
     if (Test-Path -LiteralPath $createdVersionPath) {
         $createdVersion = Get-Content -LiteralPath $createdVersionPath -Raw | ConvertFrom-Json
         Assert-Equal $createdVersion.version '2702.1.58' 'Fusion watcher live script posts inventory build in Action1 version body'
+        Assert-True ($createdVersion.internal_notes -like '*FusionManagedUpdaterReleaseSignal*') 'Fusion watcher live script posts release signal fingerprint in Action1 version body'
     }
+
+    Set-Content -LiteralPath (Join-Path $watcherLiveTempRoot 'action1-package.json') -Encoding ASCII -Value (@{
+        versions = @{
+            items = @(
+                @{
+                    version = '2702.1.58'
+                    internal_notes = $createdVersion.internal_notes
+                }
+            )
+        }
+    } | ConvertTo-Json -Depth 20 -Compress)
+    Remove-Item -LiteralPath $watcherStatePath -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath (Join-Path $watcherLiveTempRoot 'api-requests.log') -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $createdVersionPath -ErrorAction SilentlyContinue
+
+    $adoptWatcherResult = Invoke-WatcherScript -Arguments @('-AutodeskInstallerUrl', 'https://offline-fixture.invalid/FusionAdminInstall.exe', '-StatePath', $watcherStatePath, '-OfflineFixtureRoot', $watcherLiveTempRoot)
+    Assert-Equal $adoptWatcherResult.ExitCode 0 'Fusion watcher live script adopts state when matching release signal version already exists'
+    Assert-True ($adoptWatcherResult.Output -like '*already exists with matching release signal*') 'Fusion watcher live script reports idempotent state adoption'
+    Assert-True (Test-Path -LiteralPath $watcherStatePath) 'Fusion watcher live script writes state after matching duplicate adoption'
+
+    $adoptRequests = @(Get-Content -LiteralPath (Join-Path $watcherLiveTempRoot 'api-requests.log'))
+    Assert-True (($adoptRequests -join "`n") -notlike '*POST /software-repository/all/pkg-1/versions*') 'Fusion watcher live script does not post duplicate when adopting matching release signal'
 
     Set-Content -LiteralPath (Join-Path $watcherLiveTempRoot 'action1-package.json') -Encoding ASCII -Value '{"versions":{"items":[{"version":"2702.1.58"}]}}'
     Remove-Item -LiteralPath $watcherStatePath -ErrorAction SilentlyContinue

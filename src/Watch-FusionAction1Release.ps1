@@ -120,14 +120,19 @@ else {
     $inventory = Invoke-Action1Api -Method GET -Path "/installed-software/$OrgId/data?filter=$inventoryFilter&limit=1000"
     $buildVersion = Resolve-FusionWatcherBuildVersion -Inventory $inventory -ManualBuildVersion $manualBuildVersion
 }
-$body = New-Action1FusionVersionBody -BuildVersion $buildVersion -DetectedDate $detectedDate -PayloadFileName 'FusionManagedUpdater.cmd'
+$body = New-Action1FusionVersionBody -BuildVersion $buildVersion -DetectedDate $detectedDate -PayloadFileName 'FusionManagedUpdater.cmd' -AutodeskHead $head
 
 $package = Invoke-Action1Api -Method GET -Path "/software-repository/$OrgId/$PackageId?fields=versions"
 if (-not (Test-Action1PackageVersionContainerPresent -Package $package)) {
     throw 'Action1 package response did not include a versions container. Cannot verify duplicate package versions before live creation.'
 }
 
-[void](Assert-FusionWatcherNewBuildNotAlreadyRecorded -Package $package -BuildVersion $buildVersion)
+$versionAction = Resolve-FusionWatcherPackageVersionAction -Package $package -BuildVersion $buildVersion -AutodeskHead $head
+if ($versionAction -eq 'AdoptState') {
+    Write-State -Path $StatePath -State $head
+    Write-Host "Action1 Fusion history version for $buildVersion already exists with matching release signal; updated watcher state."
+    exit 0
+}
 
 Invoke-Action1Api -Method POST -Path "/software-repository/$OrgId/$PackageId/versions" -Body $body | Out-Null
 Write-State -Path $StatePath -State $head
