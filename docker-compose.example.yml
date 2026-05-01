@@ -1,6 +1,6 @@
 services:
   fusion-action1-updater:
-    image: ghcr.io/your-org/action1-fusion-managed-updater:latest
+    image: brownindustries/action1-fusion-managed-updater:latest
     build: .
     environment:
       ACTION1_CLIENT_ID: "${ACTION1_CLIENT_ID:?set ACTION1_CLIENT_ID}"
