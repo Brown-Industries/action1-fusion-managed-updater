@@ -870,6 +870,9 @@ Assert-True (($blockingProcesses.ProcessName -contains 'Fusion360') -and ($block
 Assert-True ($blockingProcesses.ProcessName -notcontains 'FusionService') 'Fusion blocking process helper excludes service-like background process names'
 Assert-True ($blockingProcesses.ProcessName -notcontains 'Autodesk Fusion 360') 'Fusion blocking process helper excludes display names with spaces'
 
+$endpointScriptText = Get-Content -LiteralPath $endpointScript -Raw
+Assert-True (-not $endpointScriptText.Contains('$LASTEXITCODE')) 'Endpoint updater captures native process exit codes without relying on LASTEXITCODE'
+
 $tempRoot = Join-Path $env:TEMP ('fmu-bootstrap-test-' + [guid]::NewGuid().ToString('N'))
 $webDeployRoot = Join-Path $tempRoot 'Autodesk\webdeploy'
 $fakeInstaller = Join-Path $tempRoot 'fake-admin-install.ps1'

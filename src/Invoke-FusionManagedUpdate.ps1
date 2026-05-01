@@ -124,6 +124,122 @@ function Save-FusionAdminInstaller {
     return $target
 }
 
+function ConvertTo-ProcessArgumentString {
+    param([string[]]$ArgumentList)
+
+    $quoted = foreach ($argument in $ArgumentList) {
+        $value = [string]$argument
+        if ([string]::IsNullOrEmpty($value)) {
+            '""'
+        }
+        elseif ($value -notmatch '[\s"]') {
+            $value
+        }
+        else {
+            '"' + $value.Replace('"', '\"') + '"'
+        }
+    }
+    return ($quoted -join ' ')
+}
+
+function Get-CurrentPowerShellExecutable {
+    try {
+        $currentProcess = Get-Process -Id $PID -ErrorAction Stop
+        if ($currentProcess.Path) {
+            return $currentProcess.Path
+        }
+    }
+    catch {
+    }
+
+    $pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
+    if ($pwsh) {
+        return $pwsh.Source
+    }
+
+    return 'powershell.exe'
+}
+
+function Invoke-FusionChildProcess {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [string[]]$ArgumentList = @()
+    )
+
+    $processPath = $FilePath
+    $processArguments = @($ArgumentList)
+    if ([IO.Path]::GetExtension($FilePath) -ieq '.ps1') {
+        $processPath = Get-CurrentPowerShellExecutable
+        $processArguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $FilePath) + $processArguments
+    }
+
+    $startInfo = New-Object Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $processPath
+    $startInfo.Arguments = ConvertTo-ProcessArgumentString -ArgumentList $processArguments
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+
+    $workingDirectory = Split-Path -Parent $FilePath
+    if ($workingDirectory -and (Test-Path -LiteralPath $workingDirectory)) {
+        $startInfo.WorkingDirectory = $workingDirectory
+    }
+
+    $process = New-Object Diagnostics.Process
+    $process.StartInfo = $startInfo
+    try {
+        [void]$process.Start()
+        $process.WaitForExit()
+        return $process.ExitCode
+    }
+    catch {
+        throw "Failed to run process '$FilePath'. $($_.Exception.Message)"
+    }
+    finally {
+        $process.Dispose()
+    }
+}
+
+function Remove-FusionAdminInstallerFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [int]$Attempts = 30,
+        [int]$DelaySeconds = 2
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $true
+    }
+
+    $lastError = ''
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        try {
+            Remove-Item -LiteralPath $Path -Force -ErrorAction Stop
+            Write-LogLine "FMU_STEP bootstrap_installer_deleted path=$Path"
+            return $true
+        }
+        catch {
+            $lastError = $_.Exception.Message
+            if ($attempt -lt $Attempts) {
+                Start-Sleep -Seconds $DelaySeconds
+            }
+        }
+    }
+
+    Write-LogLine "FMU_STEP bootstrap_installer_delete_failed path=$Path error=$lastError"
+    return $false
+}
+
+function Remove-StaleFusionAdminInstallers {
+    param([Parameter(Mandatory = $true)][string]$WorkRoot)
+
+    if (-not (Test-Path -LiteralPath $WorkRoot)) {
+        return
+    }
+
+    Get-ChildItem -LiteralPath $WorkRoot -Filter 'FusionAdminInstall-*' -File -ErrorAction SilentlyContinue |
+        ForEach-Object { [void](Remove-FusionAdminInstallerFile -Path $_.FullName -Attempts 3 -DelaySeconds 1) }
+}
+
 function Invoke-FusionAdminBootstrapInstall {
     param(
         [Parameter(Mandatory = $true)][string]$InstallerSource,
@@ -134,17 +250,15 @@ function Invoke-FusionAdminBootstrapInstall {
     try {
         $installerPath = Save-FusionAdminInstaller -Source $InstallerSource -WorkRoot $WorkRoot
         Write-Step -Name 'bootstrap_install_start' -Message "installer=$installerPath"
-        & $installerPath --globalinstall --quiet
-        $installerExitCode = $LASTEXITCODE
-        if ($null -ne $installerExitCode -and $installerExitCode -ne 0) {
+        $installerExitCode = Invoke-FusionChildProcess -FilePath $installerPath -ArgumentList @('--globalinstall', '--quiet')
+        if ($installerExitCode -ne 0) {
             throw "Fusion admin bootstrap installer failed with exit code $installerExitCode."
         }
         Write-Step -Name 'bootstrap_install_success'
     }
     finally {
-        if ($installerPath -and (Test-Path -LiteralPath $installerPath)) {
-            Remove-Item -LiteralPath $installerPath -Force
-            Write-LogLine "FMU_STEP bootstrap_installer_deleted path=$installerPath"
+        if ($installerPath) {
+            [void](Remove-FusionAdminInstallerFile -Path $installerPath)
         }
     }
 }
@@ -157,9 +271,9 @@ function Invoke-FusionQuery {
     )
 
     Write-Step -Name "${Phase}_query_start"
-    & $Streamer --globalinstall --process query --infofile $InfoPath --quiet
-    if ($LASTEXITCODE -ne 0) {
-        throw "Fusion query failed during $Phase with exit code $LASTEXITCODE."
+    $queryExitCode = Invoke-FusionChildProcess -FilePath $Streamer -ArgumentList @('--globalinstall', '--process', 'query', '--infofile', $InfoPath, '--quiet')
+    if ($queryExitCode -ne 0) {
+        throw "Fusion query failed during $Phase with exit code $queryExitCode."
     }
     $info = Read-FusionInfoFile -Path $InfoPath
     Write-Step -Name "${Phase}_query_success" -Message "build=$($info.BuildVersion) release=$($info.ReleaseVersion)"
@@ -171,6 +285,7 @@ $afterPath = Join-Path $env:TEMP ('fusion-after-' + [guid]::NewGuid().ToString('
 
 try {
     $installerRoot = if (-not [string]::IsNullOrWhiteSpace($InstallerWorkRoot)) { $InstallerWorkRoot } else { $env:TEMP }
+    Remove-StaleFusionAdminInstallers -WorkRoot $installerRoot
     Write-Step -Name 'start' -Message "webDeployRoot=$WebDeployRoot logPath=$script:LogPath"
 
     $streamer = ''
@@ -224,9 +339,9 @@ try {
     Stop-OrWaitFusionProcesses -Policy $RunningProcessPolicy -TimeoutSeconds $WaitSeconds
 
     Write-Step -Name 'update_start'
-    & $streamer --globalinstall --process update --quiet
-    if ($LASTEXITCODE -ne 0) {
-        throw "Fusion streamer update failed with exit code $LASTEXITCODE."
+    $updateExitCode = Invoke-FusionChildProcess -FilePath $streamer -ArgumentList @('--globalinstall', '--process', 'update', '--quiet')
+    if ($updateExitCode -ne 0) {
+        throw "Fusion streamer update failed with exit code $updateExitCode."
     }
     Write-Step -Name 'update_success'
 
