@@ -1,6 +1,6 @@
 # Action1 Validation Notes
 
-Date: 2026-04-30
+Date: 2026-05-01
 
 ## Match Conflict Check
 
@@ -16,7 +16,21 @@ The Action1 connector returned a structured-content shape error before exposing 
 Invalid input: expected record, received array
 ```
 
-This was observed through the `action1_check_package_match_conflicts` connector tool. No match-conflict conclusion was reached. Live package creation is blocked until this check succeeds through the connector, direct Action1 API, or Action1 UI.
+This was observed through the `action1_check_package_match_conflicts` connector tool.
+
+The same check was rerun through the direct Action1 REST API on 2026-05-01:
+
+```text
+GET /software-repository/all/match-conflicts?app_name_match=%5EAutodesk%20Fusion%28%3F%3A%20360%29%3F%24
+```
+
+Result:
+
+```json
+[]
+```
+
+The direct API returned HTTP 200 with an empty conflict array. No blocking or conflicting package matches were found for `^Autodesk Fusion(?: 360)?$`.
 
 ## Package Dry Run
 
@@ -82,7 +96,7 @@ Version dry-run request body:
 
 Before any live Action1 write:
 
-1. Rerun the match-conflict check through the Action1 connector, direct Action1 API, or Action1 UI and confirm the result has no blocking or conflicting package matches.
+1. Match-conflict check completed through the direct Action1 API on 2026-05-01 with no blocking or conflicting package matches.
 2. Create or identify the real Action1 package ID for `Autodesk Fusion Managed Updater`.
 3. Replace `PLACEHOLDER_FUSION_PACKAGE_ID` with the real package ID.
 4. Rerun package and version creation dry-runs and confirm both complete without validation errors.
