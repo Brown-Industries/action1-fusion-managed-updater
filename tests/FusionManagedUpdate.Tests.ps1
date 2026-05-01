@@ -192,6 +192,21 @@ $packageWithMatchingSignalVersion = [pscustomobject]@{
 }
 Assert-Equal (Resolve-FusionWatcherPackageVersionAction -Package $packageWithMatchingSignalVersion -BuildVersion '2702.1.58' -AutodeskHead $autodeskHead) 'AdoptState' 'Fusion watcher duplicate guard adopts state when release signal fingerprint matches existing version'
 
+$wildcardHead = [pscustomobject]@{
+    Url           = $autodeskHead.Url
+    LastModified  = $autodeskHead.LastModified
+    ETag          = '"abc*def"'
+    ContentLength = $autodeskHead.ContentLength
+}
+$wildcardSimilarPackage = [pscustomobject]@{
+    versions = [pscustomobject]@{
+        items = @(
+            [pscustomobject]@{ version = '2702.1.58'; internal_notes = 'FusionManagedUpdaterReleaseSignal Url=https://dl.appstreaming.autodesk.com/production/installers/Fusion%20Admin%20Install.exe; LastModified=Thu, 23 Apr 2026 03:21:46 GMT; ETag="abcXYZdef"; ContentLength=1486420912' }
+        )
+    }
+}
+Assert-ThrowsLike { Resolve-FusionWatcherPackageVersionAction -Package $wildcardSimilarPackage -BuildVersion '2702.1.58' -AutodeskHead $wildcardHead } '*does not include the Autodesk release signal fingerprint*' 'Fusion watcher duplicate guard treats release signal fingerprint as literal text'
+
 $watcherLiveTempRoot = Join-Path $env:TEMP ('fmu-watcher-live-test-' + [guid]::NewGuid().ToString('N'))
 $watcherStatePath = Join-Path $watcherLiveTempRoot 'state.json'
 $watcherPackageJson = '{"versions":{"items":[{"version":"2702.1.47"}]}}'

@@ -304,7 +304,7 @@ function Test-Action1PackageVersionRecordHasReleaseSignal {
         }
     }
 
-    return (($candidateText -join "`n") -like "*$ReleaseSignalFingerprint*")
+    return ($candidateText -join "`n").Contains($ReleaseSignalFingerprint)
 }
 
 function Resolve-FusionWatcherPackageVersionAction {
