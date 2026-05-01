@@ -77,8 +77,8 @@ Each run:
 4. Resolves the highest observed Fusion version from inventory entries named `Autodesk Fusion` or `Autodesk Fusion 360`.
 5. Queries the package versions.
 6. If the resolved version already exists and has `binary_id.Windows_64`, logs an already-recorded message and exits successfully.
-7. If the resolved version already exists without `binary_id.Windows_64`, uploads `FusionManagedUpdater.cmd` to repair the incomplete version.
-8. If the resolved version does not exist, creates the version and uploads `FusionManagedUpdater.cmd`.
+7. If the resolved version already exists without `binary_id.Windows_64`, uploads `FusionManagedUpdater.ps1` to repair the incomplete version.
+8. If the resolved version does not exist, creates the version and uploads `FusionManagedUpdater.ps1`.
 
 This means container restarts or repeated cron runs may perform extra API reads, but they should not fail solely because a version has already been recorded.
 
@@ -104,7 +104,7 @@ The created version remains at Action1's default approval status. The container 
 
 ## Payload Upload
 
-After creating a new version, the container uploads the generated `FusionManagedUpdater.cmd` to the created version's Windows 64-bit file slot.
+After creating a new version, the container uploads the generated `FusionManagedUpdater.ps1` to the created version's Windows 64-bit file slot.
 
 The upload flow uses the Action1 direct API because the connector could not provide the required upload headers:
 

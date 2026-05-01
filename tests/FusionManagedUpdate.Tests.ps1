@@ -592,7 +592,7 @@ $packageWithConfiguredFileButNoBinary = [pscustomobject]@{
         [pscustomobject]@{
             id = 'version-1'
             version = '2702.1.58'
-            file_name = [pscustomobject]@{ Windows_64 = [pscustomobject]@{ name = 'FusionManagedUpdater.cmd'; type = 'cloud' } }
+            file_name = [pscustomobject]@{ Windows_64 = [pscustomobject]@{ name = 'FusionManagedUpdater.ps1'; type = 'cloud' } }
         }
     )
 }
@@ -813,9 +813,13 @@ try {
     Assert-True ($payloadResult.Output -like '*bytes*') 'Action1 payload builder reports payload size'
 
     $missingPayloadRoot = Join-Path $payloadTempRoot 'missing-webdeploy-root'
-    $payloadExecutionResult = Invoke-Payload -PayloadPath $payloadOutput -Arguments @('-WebDeployRoot', $missingPayloadRoot, '-RunningProcessPolicy', 'Fail')
+    $payloadFakeInstaller = Join-Path $payloadTempRoot 'fake-admin-install-failure.ps1'
+    Set-Content -LiteralPath $payloadFakeInstaller -Encoding ASCII -Value 'exit 22'
+    $payloadExecutionResult = Invoke-Payload -PayloadPath $payloadOutput -Arguments @('-WebDeployRoot', $missingPayloadRoot, '-RunningProcessPolicy', 'Fail', '-AdminInstallerUrl', $payloadFakeInstaller, '-InstallerWorkRoot', $payloadTempRoot, '-LogPath', (Join-Path $payloadTempRoot 'payload-smoke.log'))
     Assert-True ($payloadExecutionResult.ExitCode -ne 0) 'Action1 generated payload smoke test returns endpoint failure code'
     Assert-True ($payloadExecutionResult.Output -like "*$missingPayloadRoot*") 'Action1 generated payload forwards WebDeployRoot argument during smoke test'
+    $remainingPayloadInstallers = @(Get-ChildItem -LiteralPath $payloadTempRoot -Filter 'FusionAdminInstall-*' -File)
+    Assert-Equal $remainingPayloadInstallers.Count 0 'Action1 generated payload deletes bootstrap installer after smoke-test failure'
 }
 finally {
     if (Test-Path -LiteralPath $payloadTempRoot) {
@@ -866,10 +870,62 @@ Assert-True (($blockingProcesses.ProcessName -contains 'Fusion360') -and ($block
 Assert-True ($blockingProcesses.ProcessName -notcontains 'FusionService') 'Fusion blocking process helper excludes service-like background process names'
 Assert-True ($blockingProcesses.ProcessName -notcontains 'Autodesk Fusion 360') 'Fusion blocking process helper excludes display names with spaces'
 
-$missingRoot = Join-Path $env:TEMP ('fmu-missing-' + [guid]::NewGuid().ToString('N'))
-$missingRootResult = Invoke-EndpointScript -Arguments @('-WebDeployRoot', $missingRoot)
-Assert-True ($missingRootResult.ExitCode -ne 0) 'Endpoint updater fails when webdeploy root is missing'
-Assert-True ($missingRootResult.Output -like '*All-users Fusion webdeploy root was not found*') 'Endpoint updater reports missing webdeploy root'
+$tempRoot = Join-Path $env:TEMP ('fmu-bootstrap-test-' + [guid]::NewGuid().ToString('N'))
+$webDeployRoot = Join-Path $tempRoot 'Autodesk\webdeploy'
+$fakeInstaller = Join-Path $tempRoot 'fake-admin-install.ps1'
+$fakeStreamer = Join-Path $tempRoot 'fake-streamer-bootstrap.ps1'
+$markerPath = Join-Path $tempRoot 'bootstrap-operations.txt'
+$logPath = Join-Path $tempRoot 'FusionManagedUpdater.log'
+New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+New-Item -ItemType File -Path $markerPath -Force | Out-Null
+Set-Content -LiteralPath $fakeInstaller -Encoding ASCII -Value @(
+    'Add-Content -LiteralPath $env:FMU_TEST_MARKER -Value ("installer_args=" + ($args -join ","))',
+    '$streamerDir = Join-Path $env:FMU_TEST_WEBDEPLOY_ROOT ''meta\streamer\20260501000000''',
+    'New-Item -ItemType Directory -Path $streamerDir -Force | Out-Null',
+    'exit 0'
+)
+Set-Content -LiteralPath $fakeStreamer -Encoding ASCII -Value @(
+    '$mode = $null',
+    '$info = $null',
+    'for ($i = 0; $i -lt $args.Count; $i++) {',
+    '    if ($args[$i] -eq ''--process'' -and ($i + 1) -lt $args.Count) { $mode = $args[$i + 1] }',
+    '    if ($args[$i] -eq ''--infofile'' -and ($i + 1) -lt $args.Count) { $info = $args[$i + 1] }',
+    '}',
+    'Add-Content -LiteralPath $env:FMU_TEST_MARKER -Value $mode',
+    'if ($mode -eq ''query'') {',
+    '    Set-Content -LiteralPath $info -Encoding ASCII -Value ''{"manifest":{"build-version":"2702.1.58","major-update-version":"","release-version":"test","streamer":{"feature-version":"test","release-id":"test"},"properties":{"display-name":"Autodesk Fusion"}},"install_path":"C:\\Fake","connection":"offline","stream":"test"}''',
+    '    exit 0',
+    '}',
+    'exit 9'
+)
+
+$previousMarker = $env:FMU_TEST_MARKER
+$previousWebDeployRoot = $env:FMU_TEST_WEBDEPLOY_ROOT
+$env:FMU_TEST_MARKER = $markerPath
+$env:FMU_TEST_WEBDEPLOY_ROOT = $webDeployRoot
+try {
+    $bootstrapResult = Invoke-EndpointScript -Arguments @('-WebDeployRoot', $webDeployRoot, '-AdminInstallerUrl', $fakeInstaller, '-InstallerWorkRoot', $tempRoot, '-StreamerPathOverride', $fakeStreamer, '-LogPath', $logPath)
+    Assert-Equal $bootstrapResult.ExitCode 0 'Endpoint updater exits 0 after bootstrapping missing all-users Fusion'
+    Assert-True ($bootstrapResult.Output -like '*FMU_STEP bootstrap_download_start*') 'Endpoint updater reports bootstrap download start to Action1 output'
+    Assert-True ($bootstrapResult.Output -like '*FMU_STEP bootstrap_install_start*') 'Endpoint updater reports bootstrap install start to Action1 output'
+    Assert-True ($bootstrapResult.Output -like '*FMU_STEP verification_success*') 'Endpoint updater reports verification success to Action1 output'
+
+    $bootstrapOperations = @(Get-Content -LiteralPath $markerPath | Where-Object { $_ })
+    Assert-True ($bootstrapOperations -contains 'installer_args=--quiet') 'Bootstrap installer is run with quiet switch'
+    Assert-True ($bootstrapOperations -contains 'query') 'Endpoint updater queries Fusion after bootstrap install'
+    Assert-True (Test-Path -LiteralPath $logPath) 'Endpoint updater writes durable status log'
+    if (Test-Path -LiteralPath $logPath) {
+        $logText = Get-Content -LiteralPath $logPath -Raw
+        Assert-True ($logText -like '*FMU_STEP bootstrap_install_success*') 'Durable status log records bootstrap install success'
+    }
+    $remainingInstallers = @(Get-ChildItem -LiteralPath $tempRoot -Filter 'FusionAdminInstall-*' -File)
+    Assert-Equal $remainingInstallers.Count 0 'Endpoint updater deletes downloaded bootstrap installer after install'
+}
+finally {
+    $env:FMU_TEST_MARKER = $previousMarker
+    $env:FMU_TEST_WEBDEPLOY_ROOT = $previousWebDeployRoot
+    Remove-Item -LiteralPath $tempRoot -Recurse -Force
+}
 
 $tempRoot = Join-Path $env:TEMP ('fmu-test-' + [guid]::NewGuid().ToString('N'))
 $webDeployRoot = Join-Path $tempRoot 'Autodesk\webdeploy'

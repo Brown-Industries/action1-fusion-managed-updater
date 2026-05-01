@@ -1,10 +1,10 @@
 # Autodesk Fusion Action1 Managed Updater
 
-This repository builds a small Action1 package payload that updates Autodesk Fusion through Autodesk's live streamer endpoint.
+This repository builds a small Action1 package payload that installs or updates Autodesk Fusion through Autodesk's live admin installer and streamer endpoints.
 
 ## Package Semantics
 
-Action1 versions are release-history records. They do not pin old Fusion payloads. Autodesk's streamer controls the actual installable build. Deploying an older Action1 version will still update the endpoint to Autodesk's currently available Fusion build.
+Action1 versions are release-history records. They do not pin old Fusion payloads. Autodesk controls the actual installable build. Deploying an older Action1 version will still install or update the endpoint to Autodesk's currently available Fusion build.
 
 Historical versions are not rollback installers. Use them as audit records for observed Fusion builds and Action1 release history only.
 
@@ -17,7 +17,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\packaging\build-action
 
 Output:
 ```text
-dist\FusionManagedUpdater.cmd
+dist\FusionManagedUpdater.ps1
 ```
 
 The generated payload is ignored by git by default. `dist/.gitkeep` is tracked only to keep the output directory present.
@@ -30,6 +30,22 @@ The payload forwards any arguments it receives to `Invoke-FusionManagedUpdate.ps
 ```
 
 Leave switches blank for the default behavior: wait up to 3600 seconds for user-facing Fusion processes to close.
+
+If the all-users Fusion webdeploy root is missing, the payload downloads Autodesk's current admin installer from:
+
+```text
+https://dl.appstreaming.autodesk.com/production/installers/Fusion%20Admin%20Install.exe
+```
+
+The downloaded installer is saved under the endpoint temp directory, run with `--quiet`, and deleted in a `finally` block whether install succeeds or fails. After bootstrap, the payload verifies the installed Fusion build with the Autodesk streamer. If all-users Fusion already exists, the payload skips bootstrap and runs the existing streamer update flow.
+
+The endpoint writes progress to stdout for Action1 history and to a durable log:
+
+```text
+C:\ProgramData\BrownIndustries\Action1FusionManagedUpdater\FusionManagedUpdater.log
+```
+
+Progress lines use the `FMU_STEP` prefix, including `bootstrap_download_start`, `bootstrap_install_start`, `update_start`, `verification_success`, and `failure`.
 
 ## Run Tests
 
@@ -112,9 +128,9 @@ DOCKER_HUB_REG_PASSWORD
 
 The GitHub repository should be public under the `Brown-Industries` organization, and the Docker Hub namespace/repository should be `brownindustries/action1-fusion-managed-updater`.
 
-## Endpoint Lab Update Test
+## Endpoint Lab Install/Update Test
 
-This performs a real Autodesk streamer update on the machine. Run it only on a lab machine with all-users Fusion installed:
+This performs a real Autodesk bootstrap install when all-users Fusion is missing, or a streamer update when all-users Fusion is already installed. Run it only on a lab machine:
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\src\Invoke-FusionManagedUpdate.ps1 -RunningProcessPolicy Fail
 ```
@@ -150,7 +166,7 @@ Do not run live watcher mode until the manual gates in `action1/validation-notes
 ## Recommended Deployment
 
 1. Run tests.
-2. Build `dist\FusionManagedUpdater.cmd`.
+2. Build `dist\FusionManagedUpdater.ps1`.
 3. Run watcher dry-run.
 4. Complete the live-write preconditions in `action1/validation-notes.md`, including a successful match-conflict result with no blocking or conflicting package matches.
 5. Validate Action1 package/version dry-runs using the connector, API, or UI flow documented in `action1/validation-notes.md`.
