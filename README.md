@@ -65,7 +65,7 @@ $env:ACTION1_FUSION_PACKAGE_ID='<Action1 package id>'
 $env:ACTION1_ORG_ID='<Action1 organization id or all>'
 ```
 
-`ACTION1_ORG_ID` defaults to `all` if unset. Live watcher runs query Action1 installed software inventory for `Autodesk Fusion` and use the highest observed Fusion version as the Action1 package version to create.
+`ACTION1_ORG_ID` defaults to `all` if unset. In live mode, the watcher queries Action1 installed software inventory for `Autodesk Fusion` and uses the highest observed Fusion version as the Action1 package version to create.
 
 `FUSION_OBSERVED_BUILD_VERSION` is optional in live mode. If set, it must match the highest Action1 inventory version. Use `-AllowManualObservedBuild` only when you verified the build outside Action1 and need to create the history version before inventory catches up.
 
