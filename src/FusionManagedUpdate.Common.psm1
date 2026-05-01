@@ -150,6 +150,118 @@ function Assert-FusionWatcherLiveBuildVersion {
     return $BuildVersion
 }
 
+function Resolve-FusionWatcherBuildVersion {
+    param(
+        [Parameter(Mandatory = $true)]$Inventory,
+        [string]$ManualBuildVersion = '',
+        [switch]$AllowManualObservedBuild
+    )
+
+    $manualBuild = if ($ManualBuildVersion) { $ManualBuildVersion.Trim() } else { '' }
+    if ($AllowManualObservedBuild) {
+        return Assert-FusionWatcherLiveBuildVersion -BuildVersion $manualBuild
+    }
+
+    $inventoryBuild = Get-HighestFusionInventoryVersion -Inventory $Inventory
+    if ([string]::IsNullOrWhiteSpace($inventoryBuild)) {
+        throw 'Action1 installed software inventory did not report an Autodesk Fusion build version. Refresh Action1 inventory before live version creation, or use -AllowManualObservedBuild with a verified FUSION_OBSERVED_BUILD_VERSION.'
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($manualBuild)) {
+        [void](Assert-FusionWatcherLiveBuildVersion -BuildVersion $manualBuild)
+        if ((Compare-FusionVersion -Left $manualBuild -Right $inventoryBuild) -ne 0) {
+            throw "FUSION_OBSERVED_BUILD_VERSION '$manualBuild' does not match highest Action1 inventory version '$inventoryBuild'. Refresh Action1 inventory or use -AllowManualObservedBuild only after verifying the build outside Action1."
+        }
+    }
+
+    return $inventoryBuild
+}
+
+function Test-Action1PackageVersionContainerPresent {
+    param([Parameter(Mandatory = $true)]$Package)
+
+    return $null -ne $Package.PSObject.Properties['versions']
+}
+
+function Get-Action1PackageVersionValues {
+    param([Parameter(Mandatory = $true)]$Package)
+
+    $containers = @()
+    foreach ($propertyName in @('versions', 'version')) {
+        $property = $Package.PSObject.Properties[$propertyName]
+        if ($property) {
+            $containers += $property.Value
+        }
+    }
+
+    $items = @()
+    foreach ($container in $containers) {
+        if ($null -eq $container) {
+            continue
+        }
+
+        $nestedItems = $null
+        foreach ($nestedName in @('items', 'data', 'results')) {
+            $nestedProperty = $container.PSObject.Properties[$nestedName]
+            if ($nestedProperty) {
+                $nestedItems = $nestedProperty.Value
+                break
+            }
+        }
+
+        if ($null -ne $nestedItems) {
+            $items += @($nestedItems)
+        }
+        else {
+            $items += @($container)
+        }
+    }
+
+    $versions = @()
+    foreach ($item in $items) {
+        if ($null -eq $item) {
+            continue
+        }
+        if ($item -is [string]) {
+            $versions += $item
+            continue
+        }
+
+        $valueFound = $false
+        foreach ($versionPropertyName in @('version')) {
+            $versionProperty = $item.PSObject.Properties[$versionPropertyName]
+            if ($versionProperty -and -not [string]::IsNullOrWhiteSpace([string]$versionProperty.Value)) {
+                $versions += [string]$versionProperty.Value
+                $valueFound = $true
+                break
+            }
+        }
+        if ($valueFound) {
+            continue
+        }
+
+        $fieldsProperty = $item.PSObject.Properties['fields']
+        if ($fieldsProperty) {
+            $fieldVersion = $fieldsProperty.Value.PSObject.Properties['Version']
+            if ($fieldVersion -and -not [string]::IsNullOrWhiteSpace([string]$fieldVersion.Value)) {
+                $versions += [string]$fieldVersion.Value
+            }
+        }
+    }
+
+    return $versions
+}
+
+function Test-Action1PackageHasVersion {
+    param(
+        [Parameter(Mandatory = $true)]$Package,
+        [Parameter(Mandatory = $true)][string]$BuildVersion
+    )
+
+    $versions = @(Get-Action1PackageVersionValues -Package $Package)
+    return $versions -contains $BuildVersion
+}
+
 function Write-FusionWatcherState {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -215,4 +327,4 @@ function Get-FusionBlockingProcesses {
     return $Processes | Where-Object { $names -contains $_.ProcessName }
 }
 
-Export-ModuleMember -Function ConvertTo-FusionVersionParts, Compare-FusionVersion, Read-FusionInfoFile, Get-HighestFusionInventoryVersion, New-HistoricalVersionWarning, New-Action1FusionVersionBody, Test-AutodeskHeadChanged, New-FusionWatcherDryRunResult, Assert-FusionWatcherLiveBuildVersion, Write-FusionWatcherState, Get-AutodeskInstallerHead, ConvertFrom-AutodeskInstallerHeadRecord, Get-LatestFusionStreamer, Get-FusionBlockingProcesses
+Export-ModuleMember -Function ConvertTo-FusionVersionParts, Compare-FusionVersion, Read-FusionInfoFile, Get-HighestFusionInventoryVersion, New-HistoricalVersionWarning, New-Action1FusionVersionBody, Test-AutodeskHeadChanged, New-FusionWatcherDryRunResult, Assert-FusionWatcherLiveBuildVersion, Resolve-FusionWatcherBuildVersion, Test-Action1PackageVersionContainerPresent, Get-Action1PackageVersionValues, Test-Action1PackageHasVersion, Write-FusionWatcherState, Get-AutodeskInstallerHead, ConvertFrom-AutodeskInstallerHeadRecord, Get-LatestFusionStreamer, Get-FusionBlockingProcesses

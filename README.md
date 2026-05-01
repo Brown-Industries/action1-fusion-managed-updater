@@ -22,6 +22,15 @@ dist\FusionManagedUpdater.cmd
 
 The generated payload is ignored by git by default. `dist/.gitkeep` is tracked only to keep the output directory present.
 
+The payload forwards any arguments it receives to `Invoke-FusionManagedUpdate.ps1`. Useful Action1 install switches include:
+
+```text
+-RunningProcessPolicy Fail
+-RunningProcessPolicy Wait -WaitSeconds 1800
+```
+
+Leave switches blank for the default behavior: wait up to 3600 seconds for user-facing Fusion processes to close.
+
 ## Run Tests
 
 Command:
@@ -38,14 +47,14 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\src\Invoke-FusionManag
 
 ## Watcher Dry Run
 
-Replace the sample build with the currently observed Fusion build before relying on the output:
+Dry-run does not call Action1 inventory. Set `FUSION_OBSERVED_BUILD_VERSION` only when you want the preview body to show a specific build:
 
 ```powershell
 $env:FUSION_OBSERVED_BUILD_VERSION='2702.1.58'
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\src\Watch-FusionAction1Release.ps1 -DryRun
 ```
 
-After testing, clear or reset `FUSION_OBSERVED_BUILD_VERSION` so a sample value is not reused for live version creation.
+After testing, clear or reset `FUSION_OBSERVED_BUILD_VERSION` so a sample value is not reused accidentally.
 
 ## Live Watcher Environment
 
@@ -54,12 +63,15 @@ Set these environment variables before live Action1 writes:
 $env:ACTION1_ACCESS_TOKEN='<Action1 bearer token>'
 $env:ACTION1_FUSION_PACKAGE_ID='<Action1 package id>'
 $env:ACTION1_ORG_ID='<Action1 organization id or all>'
-$env:FUSION_OBSERVED_BUILD_VERSION='<current dotted Fusion build, for example 2702.1.58>'
 ```
 
-`ACTION1_ORG_ID` defaults to `all` if unset. Live watcher runs require `FUSION_OBSERVED_BUILD_VERSION` to be set to the current observed Fusion build; the script validates only dotted numeric shape, not whether the value is the latest Autodesk build.
+`ACTION1_ORG_ID` defaults to `all` if unset. Live watcher runs query Action1 installed software inventory for `Autodesk Fusion` and use the highest observed Fusion version as the Action1 package version to create.
 
-Do not run live watcher mode until the manual gates in `action1/validation-notes.md` are complete. The script enforces build version, package ID, and token checks; it does not enforce the Action1 match-conflict gate by itself.
+`FUSION_OBSERVED_BUILD_VERSION` is optional in live mode. If set, it must match the highest Action1 inventory version. Use `-AllowManualObservedBuild` only when you verified the build outside Action1 and need to create the history version before inventory catches up.
+
+Before posting a new version, the watcher also loads the Action1 package with `fields=versions` and exits without creating a duplicate if the target build version already exists.
+
+Do not run live watcher mode until the manual gates in `action1/validation-notes.md` are complete. The script enforces Action1 inventory build resolution, manual-version mismatch checks, duplicate version checks, package ID, and token checks; it does not enforce the Action1 match-conflict gate by itself.
 
 ## Recommended Deployment
 
@@ -69,7 +81,7 @@ Do not run live watcher mode until the manual gates in `action1/validation-notes
 4. Complete the live-write preconditions in `action1/validation-notes.md`, including a successful match-conflict result with no blocking or conflicting package matches.
 5. Validate Action1 package/version dry-runs using the connector, API, or UI flow documented in `action1/validation-notes.md`.
 6. Record the final conflict-check result and dry-run previews in `action1/validation-notes.md`.
-7. Set `FUSION_OBSERVED_BUILD_VERSION` to the current observed Fusion build.
+7. Refresh Action1 installed software inventory and confirm it reports the Fusion build you want to record.
 8. Run the live watcher without `-DryRun` to create the Action1 version:
    ```powershell
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\src\Watch-FusionAction1Release.ps1

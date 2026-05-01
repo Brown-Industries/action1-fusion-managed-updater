@@ -4,6 +4,7 @@ param(
     [string]$StatePath = '',
     [string]$PackageId = $env:ACTION1_FUSION_PACKAGE_ID,
     [string]$OrgId = $(if ($env:ACTION1_ORG_ID) { $env:ACTION1_ORG_ID } else { 'all' }),
+    [switch]$AllowManualObservedBuild,
     [switch]$DryRun
 )
 
@@ -49,7 +50,8 @@ function Invoke-Action1Api {
 $state = Read-State -Path $StatePath
 $head = Get-AutodeskInstallerHead -Url $AutodeskInstallerUrl
 $detectedDate = (Get-Date).ToString('yyyy-MM-dd')
-$buildVersion = if ($env:FUSION_OBSERVED_BUILD_VERSION) { $env:FUSION_OBSERVED_BUILD_VERSION } else { 'unknown-dry-run' }
+$manualBuildVersion = if ($env:FUSION_OBSERVED_BUILD_VERSION) { $env:FUSION_OBSERVED_BUILD_VERSION.Trim() } else { '' }
+$buildVersion = if ($manualBuildVersion) { $manualBuildVersion } else { 'unknown-dry-run' }
 $dryRunResult = New-FusionWatcherDryRunResult -State $state -AutodeskHead $head -BuildVersion $buildVersion -DetectedDate $detectedDate -PayloadFileName 'FusionManagedUpdater.cmd'
 $changed = $dryRunResult.Changed
 $body = $dryRunResult.Action1VersionBody
@@ -68,6 +70,27 @@ if (-not $changed) {
 
 if (-not $PackageId) {
     throw 'ACTION1_FUSION_PACKAGE_ID or -PackageId is required for live version creation.'
+}
+
+if ($AllowManualObservedBuild) {
+    $buildVersion = Resolve-FusionWatcherBuildVersion -Inventory ([pscustomobject]@{ items = @() }) -ManualBuildVersion $manualBuildVersion -AllowManualObservedBuild
+}
+else {
+    $inventoryFilter = [uri]::EscapeDataString('Autodesk Fusion')
+    $inventory = Invoke-Action1Api -Method GET -Path "/installed-software/$OrgId/data?filter=$inventoryFilter&limit=1000"
+    $buildVersion = Resolve-FusionWatcherBuildVersion -Inventory $inventory -ManualBuildVersion $manualBuildVersion
+}
+$body = New-Action1FusionVersionBody -BuildVersion $buildVersion -DetectedDate $detectedDate -PayloadFileName 'FusionManagedUpdater.cmd'
+
+$package = Invoke-Action1Api -Method GET -Path "/software-repository/$OrgId/$PackageId?fields=versions"
+if (-not (Test-Action1PackageVersionContainerPresent -Package $package)) {
+    throw 'Action1 package response did not include a versions container. Cannot verify duplicate package versions before live creation.'
+}
+
+if (Test-Action1PackageHasVersion -Package $package -BuildVersion $buildVersion) {
+    Write-State -Path $StatePath -State $head
+    Write-Host "Action1 Fusion history version for $buildVersion already exists; updated watcher state without creating a duplicate."
+    exit 0
 }
 
 Invoke-Action1Api -Method POST -Path "/software-repository/$OrgId/$PackageId/versions" -Body $body | Out-Null

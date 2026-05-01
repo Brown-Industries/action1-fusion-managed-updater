@@ -56,6 +56,26 @@ function Invoke-PayloadBuilder {
     }
 }
 
+function Invoke-Payload {
+    param(
+        [Parameter(Mandatory = $true)][string]$PayloadPath,
+        [Parameter(Mandatory = $true)][string[]]$Arguments
+    )
+
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = & $PayloadPath @Arguments 2>&1
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    [pscustomobject]@{
+        ExitCode = $LASTEXITCODE
+        Output   = ($output | Out-String)
+    }
+}
+
 $parts = ConvertTo-FusionVersionParts -Version '2702.1.58'
 Assert-Equal $parts[0] 2702 'Version parser reads first segment'
 Assert-Equal $parts[1] 1 'Version parser reads second segment'
@@ -115,6 +135,28 @@ Assert-ThrowsLike { Assert-FusionWatcherLiveBuildVersion -BuildVersion 'latest' 
 Assert-ThrowsLike { Assert-FusionWatcherLiveBuildVersion -BuildVersion '2702.bad.99' } '*numeric dotted Fusion build version*' 'Fusion watcher live build guard rejects non-numeric version segments'
 Assert-ThrowsLike { Assert-FusionWatcherLiveBuildVersion -BuildVersion '2702' } '*numeric dotted Fusion build version*' 'Fusion watcher live build guard rejects single-segment versions'
 
+$observedBuild = Resolve-FusionWatcherBuildVersion -Inventory $inventory -ManualBuildVersion '' -AllowManualObservedBuild:$false
+Assert-Equal $observedBuild '2702.1.58' 'Fusion watcher live build resolves highest Action1 inventory version'
+Assert-ThrowsLike { Resolve-FusionWatcherBuildVersion -Inventory $inventory -ManualBuildVersion '2702.1.47' -AllowManualObservedBuild:$false } '*does not match highest Action1 inventory version*' 'Fusion watcher live build rejects manual version mismatch'
+$manualOverrideBuild = Resolve-FusionWatcherBuildVersion -Inventory $inventory -ManualBuildVersion '2702.1.47' -AllowManualObservedBuild:$true
+Assert-Equal $manualOverrideBuild '2702.1.47' 'Fusion watcher live build allows explicit manual override'
+
+$emptyFusionInventory = [pscustomobject]@{ items = @() }
+Assert-ThrowsLike { Resolve-FusionWatcherBuildVersion -Inventory $emptyFusionInventory -ManualBuildVersion '' -AllowManualObservedBuild:$false } '*Action1 installed software inventory did not report*' 'Fusion watcher live build requires Action1 inventory by default'
+
+$packageWithVersions = [pscustomobject]@{
+    versions = [pscustomobject]@{
+        items = @(
+            [pscustomobject]@{ version = '2702.1.47' },
+            [pscustomobject]@{ version = '2702.1.58' }
+        )
+    }
+}
+$packageVersions = @(Get-Action1PackageVersionValues -Package $packageWithVersions)
+Assert-Equal ($packageVersions -join ',') '2702.1.47,2702.1.58' 'Action1 package version helper reads version container'
+Assert-True (Test-Action1PackageHasVersion -Package $packageWithVersions -BuildVersion '2702.1.58') 'Action1 package version helper detects existing build version'
+Assert-True (-not (Test-Action1PackageHasVersion -Package $packageWithVersions -BuildVersion '2702.1.99')) 'Action1 package version helper reports missing build version'
+
 $stateTempRoot = Join-Path $env:TEMP ('fmu-state-test-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $stateTempRoot -Force | Out-Null
 Push-Location $stateTempRoot
@@ -145,9 +187,14 @@ try {
     Assert-True ($payloadText -like '*set "moduleb64=%work%\module.b64"*') 'Action1 payload defines module base64 path'
     Assert-True ($payloadText -like '*set "scriptb64=%work%\script.b64"*') 'Action1 payload defines script base64 path'
     Assert-True ($payloadText.Contains('[Convert]::FromBase64String')) 'Action1 payload decodes embedded files'
-    Assert-True ($payloadText -like '*powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ps1%"*') 'Action1 payload runs extracted endpoint script'
+    Assert-True ($payloadText -like '*powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ps1%" %**') 'Action1 payload forwards launcher arguments to extracted endpoint script'
     Assert-True ($payloadText -like '*exit /b %code%*') 'Action1 payload exits with endpoint exit code'
     Assert-True ($payloadResult.Output -like '*bytes*') 'Action1 payload builder reports payload size'
+
+    $missingPayloadRoot = Join-Path $payloadTempRoot 'missing-webdeploy-root'
+    $payloadExecutionResult = Invoke-Payload -PayloadPath $payloadOutput -Arguments @('-WebDeployRoot', $missingPayloadRoot, '-RunningProcessPolicy', 'Fail')
+    Assert-True ($payloadExecutionResult.ExitCode -ne 0) 'Action1 generated payload smoke test returns endpoint failure code'
+    Assert-True ($payloadExecutionResult.Output -like "*$missingPayloadRoot*") 'Action1 generated payload forwards WebDeployRoot argument during smoke test'
 }
 finally {
     if (Test-Path -LiteralPath $payloadTempRoot) {

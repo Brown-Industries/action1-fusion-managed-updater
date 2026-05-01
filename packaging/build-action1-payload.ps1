@@ -48,7 +48,7 @@ foreach ($line in $scriptLines) {
     $cmd.Add(">> `"%scriptb64%`" echo $line")
 }
 $cmd.Add('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "[IO.File]::WriteAllBytes($env:module, [Convert]::FromBase64String((Get-Content -LiteralPath $env:moduleb64 -Raw))); [IO.File]::WriteAllBytes($env:ps1, [Convert]::FromBase64String((Get-Content -LiteralPath $env:scriptb64 -Raw)))"')
-$cmd.Add('powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ps1%"')
+$cmd.Add('powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ps1%" %*')
 $cmd.Add('set "code=%ERRORLEVEL%"')
 $cmd.Add('rmdir /s /q "%work%" >nul 2>nul')
 $cmd.Add('exit /b %code%')
