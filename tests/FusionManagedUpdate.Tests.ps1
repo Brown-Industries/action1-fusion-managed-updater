@@ -590,7 +590,10 @@ try {
     $env:ACTION1_CLIENT_SECRET = 'client-secret'
     $env:PACKAGE_NAME = 'Autodesk Fusion Managed Updater'
 
-    $noOpResult = Invoke-SyncScript -Arguments @('-OfflineFixtureRoot', $syncTempRoot, '-PayloadPath', (Join-Path $repoRoot 'dist/FusionManagedUpdater.cmd'))
+    $syncScriptText = Get-Content -LiteralPath $syncScript -Raw
+    Assert-True (-not $syncScriptText.Contains("'..\dist\FusionManagedUpdater.cmd'")) 'Stateless sync default payload path is built from portable path components'
+
+    $noOpResult = Invoke-SyncScript -Arguments @('-OfflineFixtureRoot', $syncTempRoot)
     Assert-Equal $noOpResult.ExitCode 0 'Stateless sync exits 0 when version is already recorded'
     Assert-True ($noOpResult.Output -like '*already recorded*') 'Stateless sync reports already-recorded version'
 
@@ -599,6 +602,49 @@ try {
     $createResult = Invoke-SyncScript -Arguments @('-OfflineFixtureRoot', $syncTempRoot, '-PayloadPath', (Join-Path $repoRoot 'dist/FusionManagedUpdater.cmd'))
     Assert-Equal $createResult.ExitCode 0 'Stateless sync exits 0 after creating and uploading missing version'
     Assert-True ($createResult.Output -like '*Created Action1 Fusion history version for 2702.1.58*') 'Stateless sync reports created version'
+    $createRequests = @(Get-Content -LiteralPath (Join-Path $syncTempRoot 'api-requests.log'))
+    Assert-True ($createRequests -contains 'GET /software-repository/all?custom=yes&filter=Autodesk%20Fusion%20Managed%20Updater&fields=*&limit=100') 'Stateless sync create flow queries packages'
+    Assert-True ($createRequests -contains 'POST /software-repository/all/pkg-1/versions') 'Stateless sync create flow posts package version'
+    Assert-True ($createRequests -contains 'UPLOAD /software-repository/all/pkg-1/versions/2702.1.58_offline/upload') 'Stateless sync create flow uploads created version payload'
+
+    Set-Content -LiteralPath (Join-Path $syncTempRoot 'package.json') -Encoding ASCII -Value '{"id":"pkg-1","versions":[{"id":"version-1","version":"2702.1.58"}]}'
+    Remove-Item -LiteralPath (Join-Path $syncTempRoot 'api-requests.log') -ErrorAction SilentlyContinue
+    $repairResult = Invoke-SyncScript -Arguments @('-OfflineFixtureRoot', $syncTempRoot)
+    Assert-Equal $repairResult.ExitCode 0 'Stateless sync exits 0 after uploading missing binary'
+    Assert-True ($repairResult.Output -like '*Uploaded missing Action1 payload for Fusion history version 2702.1.58*') 'Stateless sync reports missing binary upload'
+    $repairRequests = @(Get-Content -LiteralPath (Join-Path $syncTempRoot 'api-requests.log'))
+    Assert-True ($repairRequests -contains 'UPLOAD /software-repository/all/pkg-1/versions/version-1/upload') 'Stateless sync missing binary flow uploads existing version payload'
+    Assert-True (-not ($repairRequests -contains 'POST /software-repository/all/pkg-1/versions')) 'Stateless sync missing binary flow does not create a version'
+
+    Set-Content -LiteralPath (Join-Path $syncTempRoot 'packages.json') -Encoding ASCII -Value '{"items":[]}'
+    Set-Content -LiteralPath (Join-Path $syncTempRoot 'package.json') -Encoding ASCII -Value '{"id":"pkg-created","versions":[]}'
+    Remove-Item -LiteralPath (Join-Path $syncTempRoot 'api-requests.log') -ErrorAction SilentlyContinue
+    $packageCreateResult = Invoke-SyncScript -Arguments @('-OfflineFixtureRoot', $syncTempRoot)
+    Assert-Equal $packageCreateResult.ExitCode 0 'Stateless sync exits 0 after creating missing package'
+    $packageCreateRequests = @(Get-Content -LiteralPath (Join-Path $syncTempRoot 'api-requests.log'))
+    Assert-True ($packageCreateRequests -contains 'POST /software-repository/all') 'Stateless sync package create flow posts missing package'
+    Assert-True ($packageCreateRequests -contains 'POST /software-repository/all/pkg-created/versions') 'Stateless sync package create flow creates version under created package'
+    Assert-True ($packageCreateRequests -contains 'UPLOAD /software-repository/all/pkg-created/versions/2702.1.58_offline/upload') 'Stateless sync package create flow uploads under created package'
+
+    Set-Content -LiteralPath (Join-Path $syncTempRoot 'packages.json') -Encoding ASCII -Value '{"items":[{"id":"pkg-1","name":"Autodesk Fusion Managed Updater"}]}'
+    Set-Content -LiteralPath (Join-Path $syncTempRoot 'installed-software.json') -Encoding ASCII -Value '{"items":[]}'
+    $missingInventoryResult = Invoke-SyncScript -Arguments @('-OfflineFixtureRoot', $syncTempRoot)
+    Assert-True ($missingInventoryResult.ExitCode -ne 0) 'Stateless sync fails when inventory has no Fusion build'
+    Assert-True ($missingInventoryResult.Output -like '*Action1 installed software inventory did not report an Autodesk Fusion build version for stateless repository sync*') 'Stateless sync reports actionable missing inventory error'
+    Assert-True (-not ($missingInventoryResult.Output -like '*AllowManualObservedBuild*')) 'Stateless sync missing inventory error omits unsupported manual override advice'
+
+    Set-Content -LiteralPath (Join-Path $syncTempRoot 'installed-software.json') -Encoding ASCII -Value ($inventory | ConvertTo-Json -Depth 20 -Compress)
+    Set-Content -LiteralPath (Join-Path $syncTempRoot 'package.json') -Encoding ASCII -Value '{"id":"pkg-1","versions":[{"version":"2702.1.58"}]}'
+    $missingExistingIdResult = Invoke-SyncScript -Arguments @('-OfflineFixtureRoot', $syncTempRoot)
+    Assert-True ($missingExistingIdResult.ExitCode -ne 0) 'Stateless sync fails when existing version response has no id'
+    Assert-True ($missingExistingIdResult.Output -like '*Action1 package version record for Fusion build 2702.1.58 did not include an id*') 'Stateless sync reports missing existing version id'
+
+    Set-Content -LiteralPath (Join-Path $syncTempRoot 'package.json') -Encoding ASCII -Value '{"id":"pkg-1","versions":[]}'
+    Set-Content -LiteralPath (Join-Path $syncTempRoot 'created-version-response.json') -Encoding ASCII -Value '{"version":"2702.1.58"}'
+    $missingCreatedIdResult = Invoke-SyncScript -Arguments @('-OfflineFixtureRoot', $syncTempRoot)
+    Assert-True ($missingCreatedIdResult.ExitCode -ne 0) 'Stateless sync fails when created version response has no id'
+    Assert-True ($missingCreatedIdResult.Output -like '*Action1 create version response for Fusion build 2702.1.58 did not include an id*') 'Stateless sync reports missing created version id'
+    Remove-Item -LiteralPath (Join-Path $syncTempRoot 'created-version-response.json') -ErrorAction SilentlyContinue
 }
 finally {
     if ($null -eq $previousAction1ClientId) { Remove-Item Env:\ACTION1_CLIENT_ID -ErrorAction SilentlyContinue } else { $env:ACTION1_CLIENT_ID = $previousAction1ClientId }

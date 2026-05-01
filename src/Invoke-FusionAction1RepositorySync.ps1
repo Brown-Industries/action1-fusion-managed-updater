@@ -12,7 +12,8 @@ Import-Module $commonModulePath -Force
 Import-Module $action1ModulePath -Force
 
 if (-not $PayloadPath) {
-    $PayloadPath = Join-Path $PSScriptRoot '..\dist\FusionManagedUpdater.cmd'
+    $repoRoot = Split-Path -Parent $PSScriptRoot
+    $PayloadPath = Join-Path (Join-Path $repoRoot 'dist') 'FusionManagedUpdater.cmd'
 }
 if (-not (Test-Path -LiteralPath $PayloadPath)) {
     throw "Action1 payload was not found: $PayloadPath"
@@ -23,6 +24,11 @@ function Read-OfflineJson {
     $path = Join-Path $OfflineFixtureRoot $Name
     if (-not (Test-Path -LiteralPath $path)) { throw "Offline fixture file was not found: $path" }
     return Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+}
+
+function Test-OfflineJson {
+    param([Parameter(Mandatory = $true)][string]$Name)
+    return Test-Path -LiteralPath (Join-Path $OfflineFixtureRoot $Name)
 }
 
 function Write-OfflineRequest {
@@ -59,7 +65,15 @@ else {
     $packageDetails = Invoke-Action1JsonApi -Method 'GET' -BaseUrl $config.Action1BaseUrl -AccessToken $accessToken -Path "/software-repository/$($config.Action1OrgId)/$($package.id)?fields=versions"
 }
 
-$buildVersion = Resolve-FusionWatcherBuildVersion -Inventory $inventory
+try {
+    $buildVersion = Resolve-FusionWatcherBuildVersion -Inventory $inventory
+}
+catch {
+    if ($_.Exception.Message -like '*Action1 installed software inventory did not report*') {
+        throw 'Action1 installed software inventory did not report an Autodesk Fusion build version for stateless repository sync. Refresh Action1 inventory before running repository sync.'
+    }
+    throw
+}
 $syncAction = Resolve-Action1VersionSyncAction -Package $packageDetails -BuildVersion $buildVersion
 
 if ($syncAction -eq 'NoOp') {
@@ -71,16 +85,27 @@ if ($syncAction -eq 'CreateAndUpload') {
     $body = New-Action1FusionVersionBody -BuildVersion $buildVersion -DetectedDate (Get-Date).ToString('yyyy-MM-dd') -PayloadFileName 'FusionManagedUpdater.cmd'
     if ($OfflineFixtureRoot) {
         Write-OfflineRequest -Line "POST /software-repository/$($config.Action1OrgId)/$($package.id)/versions"
-        $createdVersion = [pscustomobject]@{ id = "$($buildVersion)_offline"; version = $buildVersion }
+        if (Test-OfflineJson -Name 'created-version-response.json') {
+            $createdVersion = Read-OfflineJson -Name 'created-version-response.json'
+        }
+        else {
+            $createdVersion = [pscustomobject]@{ id = "$($buildVersion)_offline"; version = $buildVersion }
+        }
     }
     else {
         $createdVersion = New-Action1RepositoryVersion -BaseUrl $config.Action1BaseUrl -OrgId $config.Action1OrgId -PackageId $package.id -AccessToken $accessToken -Body $body
     }
     $versionId = $createdVersion.id
+    if ([string]::IsNullOrWhiteSpace([string]$versionId)) {
+        throw "Action1 create version response for Fusion build $buildVersion did not include an id."
+    }
 }
 else {
     $existingRecord = Get-Action1PackageVersionRecord -Package $packageDetails -BuildVersion $buildVersion
     $versionId = $existingRecord.id
+    if ([string]::IsNullOrWhiteSpace([string]$versionId)) {
+        throw "Action1 package version record for Fusion build $buildVersion did not include an id."
+    }
 }
 
 if ($OfflineFixtureRoot) {
