@@ -97,7 +97,7 @@ function New-Action1FusionVersionBody {
         silent_install_switches = ''
         success_exit_codes      = '0'
         reboot_exit_codes       = ''
-        install_type            = 'exe'
+        install_type            = 'other'
         update_type             = 'Regular Updates'
         os                      = @('Windows 10', 'Windows 11')
         file_name               = @{ Windows_64 = @{ name = $PayloadFileName; type = 'cloud' } }

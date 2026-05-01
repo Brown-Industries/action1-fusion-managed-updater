@@ -191,6 +191,7 @@ Assert-Equal $versionBody.version '2702.1.58' 'Action1 version body uses Fusion 
 Assert-Equal $versionBody.app_name_match '^Autodesk Fusion(?: 360)?$' 'Action1 version body matches current and legacy Fusion names'
 Assert-True (-not $versionBody.Contains('description')) 'Action1 version body omits non-settable description field'
 Assert-True (-not $versionBody.Contains('internal_notes')) 'Action1 version body omits non-settable internal notes field'
+Assert-Equal $versionBody.install_type 'other' 'Action1 CMD payload uses Other installation type'
 Assert-Equal $versionBody.silent_install_switches '' 'Action1 payload launcher needs no switches'
 Assert-Equal $versionBody.success_exit_codes '0' 'Action1 success exit code is zero'
 
