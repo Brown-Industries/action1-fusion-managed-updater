@@ -106,8 +106,8 @@ Publishing events:
 Required GitHub repository secrets:
 
 ```text
-DOCKERHUB_USERNAME
-DOCKERHUB_TOKEN
+DOCKER_HUB_REG_USERNAME
+DOCKER_HUB_REG_PASSWORD
 ```
 
 The GitHub repository should be public under the `Brown-Industries` organization, and the Docker Hub namespace/repository should be `brownindustries/action1-fusion-managed-updater`.
