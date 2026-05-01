@@ -16,7 +16,9 @@ function Invoke-SyncOnce {
     & pwsh -NoProfile -ExecutionPolicy Bypass -File $ScriptPath
 }
 
-Invoke-SyncOnce -ScriptPath $SyncScriptPath
+$null = Invoke-FusionContainerStartupSync -OneShot $config.OneShot -SyncCommand {
+    Invoke-SyncOnce -ScriptPath $SyncScriptPath
+}
 
 if ($config.OneShot) {
     exit 0
@@ -29,16 +31,15 @@ if ($schedule.Kind -eq 'Interval') {
             Invoke-SyncOnce -ScriptPath $SyncScriptPath
         }
         catch {
-            Write-Error $_
+            Write-Error $_ -ErrorAction Continue
         }
     }
 }
 
 $envFile = '/etc/action1-fusion-container.env'
-Get-ChildItem Env: | ForEach-Object {
-    $escaped = $_.Value.Replace("'", "'\''")
-    "$($_.Name)='$escaped'"
-} | Set-Content -LiteralPath $envFile -Encoding ASCII
+$envSpec = New-FusionContainerCronEnvironmentSpec
+$envSpec.Lines | Set-Content -LiteralPath $envFile -Encoding ASCII
+chmod $envSpec.Mode $envFile
 
 $runner = '/usr/local/bin/action1-fusion-sync.sh'
 @(

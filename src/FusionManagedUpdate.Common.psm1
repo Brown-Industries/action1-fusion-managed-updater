@@ -179,7 +179,7 @@ function New-FusionContainerScheduleCommand {
     if (-not [string]::IsNullOrWhiteSpace([string]$Config.CheckFrequencyCron)) {
         return [pscustomobject]@{
             Kind       = 'Cron'
-            Expression = [string]$Config.CheckFrequencyCron
+            Expression = Assert-FusionContainerCronExpression -Expression ([string]$Config.CheckFrequencyCron)
             Command    = $command
         }
     }
@@ -188,6 +188,83 @@ function New-FusionContainerScheduleCommand {
         Kind    = 'Interval'
         Seconds = [int]$Config.CheckFrequencyMinutes * 60
         Command = $command
+    }
+}
+
+function Assert-FusionContainerCronExpression {
+    param([Parameter(Mandatory = $true)][string]$Expression)
+
+    if ([string]::IsNullOrWhiteSpace($Expression)) {
+        throw 'CHECK_FREQUENCY_CRON must not be blank.'
+    }
+
+    if ($Expression -match '[\x00-\x1F\x7F]') {
+        throw 'CHECK_FREQUENCY_CRON must not contain control characters.'
+    }
+
+    $fields = @($Expression.Trim() -split '\s+')
+    if ($fields.Count -ne 5) {
+        throw 'CHECK_FREQUENCY_CRON must contain exactly five fields.'
+    }
+
+    return $Expression
+}
+
+function New-FusionContainerCronEnvironmentSpec {
+    param([hashtable]$Environment = $null)
+
+    $names = @(
+        'ACTION1_CLIENT_ID',
+        'ACTION1_CLIENT_SECRET',
+        'ACTION1_BASE_URL',
+        'ACTION1_ORG_ID',
+        'PACKAGE_NAME',
+        'CHECK_FREQUENCY_CRON',
+        'CHECK_FREQUENCY_MINUTES',
+        'ONE_SHOT'
+    )
+
+    $lines = foreach ($name in $names) {
+        $value = Get-FusionSettingValue -Environment $Environment -Name $name
+        if ($null -ne $value) {
+            $escaped = ([string]$value).Replace("'", "'\''")
+            "$name='$escaped'"
+        }
+    }
+
+    [pscustomobject]@{
+        Mode  = '0600'
+        Lines = @($lines)
+    }
+}
+
+function Invoke-FusionContainerStartupSync {
+    param(
+        [Parameter(Mandatory = $true)][bool]$OneShot,
+        [Parameter(Mandatory = $true)][scriptblock]$SyncCommand,
+        [scriptblock]$LogCommand = {
+            param($ErrorRecord)
+            Write-Error $ErrorRecord -ErrorAction Continue
+        }
+    )
+
+    try {
+        & $SyncCommand
+        return [pscustomobject]@{
+            Succeeded          = $true
+            ContinueScheduling = $true
+        }
+    }
+    catch {
+        if ($OneShot) {
+            throw
+        }
+
+        & $LogCommand $_
+        return [pscustomobject]@{
+            Succeeded          = $false
+            ContinueScheduling = $true
+        }
     }
 }
 
@@ -479,4 +556,4 @@ function Get-FusionBlockingProcesses {
     return $Processes | Where-Object { $names -contains $_.ProcessName }
 }
 
-Export-ModuleMember -Function ConvertTo-FusionVersionParts, Compare-FusionVersion, Read-FusionInfoFile, Get-HighestFusionInventoryVersion, New-HistoricalVersionWarning, New-Action1FusionVersionBody, Get-FusionContainerRuntimeConfig, New-FusionContainerScheduleCommand, New-Action1FusionPackageBody, Test-AutodeskHeadChanged, New-FusionWatcherDryRunResult, Assert-FusionWatcherLiveBuildVersion, Resolve-FusionWatcherBuildVersion, Test-Action1PackageVersionContainerPresent, Get-Action1PackageVersionRecords, Get-Action1PackageVersionValues, Test-Action1PackageHasVersion, Get-Action1PackageVersionRecord, Test-Action1PackageVersionHasWindowsBinary, Assert-FusionWatcherNewBuildNotAlreadyRecorded, Write-FusionWatcherState, Get-AutodeskInstallerHead, ConvertFrom-AutodeskInstallerHeadRecord, Get-LatestFusionStreamer, Get-FusionBlockingProcesses
+Export-ModuleMember -Function ConvertTo-FusionVersionParts, Compare-FusionVersion, Read-FusionInfoFile, Get-HighestFusionInventoryVersion, New-HistoricalVersionWarning, New-Action1FusionVersionBody, Get-FusionContainerRuntimeConfig, New-FusionContainerScheduleCommand, Assert-FusionContainerCronExpression, New-FusionContainerCronEnvironmentSpec, Invoke-FusionContainerStartupSync, New-Action1FusionPackageBody, Test-AutodeskHeadChanged, New-FusionWatcherDryRunResult, Assert-FusionWatcherLiveBuildVersion, Resolve-FusionWatcherBuildVersion, Test-Action1PackageVersionContainerPresent, Get-Action1PackageVersionRecords, Get-Action1PackageVersionValues, Test-Action1PackageHasVersion, Get-Action1PackageVersionRecord, Test-Action1PackageVersionHasWindowsBinary, Assert-FusionWatcherNewBuildNotAlreadyRecorded, Write-FusionWatcherState, Get-AutodeskInstallerHead, ConvertFrom-AutodeskInstallerHeadRecord, Get-LatestFusionStreamer, Get-FusionBlockingProcesses

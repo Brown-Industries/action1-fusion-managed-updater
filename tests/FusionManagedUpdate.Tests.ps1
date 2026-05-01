@@ -247,6 +247,65 @@ Assert-Equal $cronCommand.Kind 'Cron' 'Schedule command prefers cron mode'
 Assert-Equal $cronCommand.Expression '0 */6 * * *' 'Schedule command preserves cron expression'
 Assert-True ($cronCommand.Command -like '*Invoke-FusionAction1RepositorySync.ps1*') 'Schedule command includes sync script'
 
+Assert-Equal (Assert-FusionContainerCronExpression -Expression '0 */6 * * *') '0 */6 * * *' 'Cron validation accepts five-field expression'
+
+Assert-ThrowsLike {
+    Assert-FusionContainerCronExpression -Expression "0 */6 * * *`n* * * * *"
+} '*control characters*' 'Cron validation rejects embedded newlines'
+
+Assert-ThrowsLike {
+    Assert-FusionContainerCronExpression -Expression '0 */6 * *'
+} '*five fields*' 'Cron validation rejects non-five-field expression'
+
+Assert-ThrowsLike {
+    New-FusionContainerScheduleCommand -Config ([pscustomobject]@{
+        CheckFrequencyCron = '0 */6 * *'
+        CheckFrequencyMinutes = 1440
+    }) -SyncScriptPath '/app/src/Invoke-FusionAction1RepositorySync.ps1'
+} '*five fields*' 'Schedule command validates cron expression before cron file generation'
+
+$cronEnvSpec = New-FusionContainerCronEnvironmentSpec -Environment @{
+    ACTION1_CLIENT_ID = 'client-id'
+    ACTION1_CLIENT_SECRET = "secret'value"
+    ACTION1_BASE_URL = 'https://app.action1.com/api/3.0'
+    ACTION1_ORG_ID = 'all'
+    PACKAGE_NAME = 'Autodesk Fusion Managed Updater'
+    CHECK_FREQUENCY_CRON = '0 */6 * * *'
+    CHECK_FREQUENCY_MINUTES = '1440'
+    ONE_SHOT = 'false'
+    PATH = '/usr/local/bin'
+    UNRELATED_SECRET = 'do-not-write'
+}
+$cronEnvText = $cronEnvSpec.Lines -join "`n"
+Assert-Equal $cronEnvSpec.Mode '0600' 'Cron environment spec locks down env file mode'
+Assert-True ($cronEnvText -like "*ACTION1_CLIENT_ID='client-id'*") 'Cron environment includes Action1 client id'
+Assert-True ($cronEnvText -like "*ACTION1_CLIENT_SECRET='secret'\''value'*") 'Cron environment escapes single quotes'
+Assert-True ($cronEnvText -like "*CHECK_FREQUENCY_CRON='0 */6 * * *'*") 'Cron environment includes scheduling vars'
+Assert-True (-not ($cronEnvText -like '*UNRELATED_SECRET*')) 'Cron environment excludes unrelated secrets'
+Assert-True (-not ($cronEnvText -like '*PATH=*')) 'Cron environment excludes unrelated path var'
+
+$oneShotStartupState = [pscustomobject]@{ Attempts = 0 }
+Assert-ThrowsLike {
+    Invoke-FusionContainerStartupSync -OneShot $true -SyncCommand {
+        $oneShotStartupState.Attempts++
+        throw 'startup failed'
+    }
+} '*startup failed*' 'One-shot startup sync failure fails fast'
+Assert-Equal $oneShotStartupState.Attempts 1 'One-shot startup sync runs once'
+
+$scheduledStartupState = [pscustomobject]@{ Attempts = 0; Logged = $null }
+$scheduledStartupResult = Invoke-FusionContainerStartupSync -OneShot $false -SyncCommand {
+    $scheduledStartupState.Attempts++
+    throw 'transient startup failed'
+} -LogCommand {
+    param($ErrorRecord)
+    $scheduledStartupState.Logged = [string]$ErrorRecord
+}
+Assert-Equal $scheduledStartupResult.Succeeded $false 'Scheduled startup sync failure is captured'
+Assert-Equal $scheduledStartupResult.ContinueScheduling $true 'Scheduled startup sync failure continues scheduling'
+Assert-Equal $scheduledStartupState.Attempts 1 'Scheduled startup sync runs once before continuing'
+Assert-True ($scheduledStartupState.Logged -like '*transient startup failed*') 'Scheduled startup sync logs startup failure'
+
 Assert-ThrowsLike {
     Get-FusionContainerRuntimeConfig -Environment @{ ACTION1_CLIENT_ID = 'client-id' }
 } '*ACTION1_CLIENT_SECRET*' 'Container config requires Action1 client secret'
