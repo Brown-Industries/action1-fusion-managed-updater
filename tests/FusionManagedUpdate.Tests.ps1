@@ -1,6 +1,10 @@
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $modulePath = Join-Path $repoRoot 'src/FusionManagedUpdate.Common.psm1'
 Import-Module $modulePath -Force
+$action1ModulePath = Join-Path $repoRoot 'src/Action1Repository.psm1'
+if (Test-Path -LiteralPath $action1ModulePath) {
+    Import-Module $action1ModulePath -Force
+}
 
 $fixtureRoot = Join-Path $PSScriptRoot 'fixtures'
 $endpointScript = Join-Path $repoRoot 'src/Invoke-FusionManagedUpdate.ps1'
@@ -196,6 +200,33 @@ Assert-ThrowsLike {
 Assert-ThrowsLike {
     Get-FusionContainerRuntimeConfig -Environment @{ ACTION1_CLIENT_SECRET = 'client-secret' }
 } '*ACTION1_CLIENT_ID*' 'Container config requires Action1 client id'
+
+$tokenBody = New-Action1TokenRequestBody -ClientId 'client 1' -ClientSecret 'secret/2'
+Assert-True ($tokenBody -like '*grant_type=client_credentials*') 'Token body uses client credentials grant'
+Assert-True ($tokenBody -like '*client_id=client+1*') 'Token body form-encodes client id'
+Assert-True ($tokenBody -like '*client_secret=secret%2F2*') 'Token body form-encodes client secret'
+
+$matchingPackages = [pscustomobject]@{
+    items = @(
+        [pscustomobject]@{ id = 'pkg-1'; name = 'Autodesk Fusion Managed Updater'; builtin = 'no' },
+        [pscustomobject]@{ id = 'pkg-2'; name = 'Autodesk Fusion Managed Updater Extra'; builtin = 'no' }
+    )
+}
+$selectedPackage = Select-Action1PackageByExactName -Packages $matchingPackages -PackageName 'Autodesk Fusion Managed Updater'
+Assert-Equal $selectedPackage.id 'pkg-1' 'Package selector returns exact package name'
+
+$noPackage = Select-Action1PackageByExactName -Packages ([pscustomobject]@{ items = @() }) -PackageName 'Autodesk Fusion Managed Updater'
+Assert-True ($null -eq $noPackage) 'Package selector returns null for no exact package'
+
+$duplicatePackages = [pscustomobject]@{
+    items = @(
+        [pscustomobject]@{ id = 'pkg-1'; name = 'Autodesk Fusion Managed Updater'; builtin = 'no' },
+        [pscustomobject]@{ id = 'pkg-2'; name = 'autodesk fusion managed updater'; builtin = 'no' }
+    )
+}
+Assert-ThrowsLike {
+    Select-Action1PackageByExactName -Packages $duplicatePackages -PackageName 'Autodesk Fusion Managed Updater'
+} '*Multiple Action1 packages*' 'Package selector rejects duplicate exact names'
 
 $packageBody = New-Action1FusionPackageBody -PackageName 'Autodesk Fusion Managed Updater'
 Assert-Equal $packageBody.name 'Autodesk Fusion Managed Updater' 'Package body uses requested package name'
