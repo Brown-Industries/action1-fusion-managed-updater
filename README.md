@@ -62,7 +62,7 @@ The intended public image is:
 brownindustries/action1-fusion-managed-updater:latest
 ```
 
-The container is stateless. It queries Action1 each run, finds or creates the package named by `PACKAGE_NAME`, detects the highest Autodesk Fusion build reported in Action1 installed software inventory, then creates or completes the corresponding Action1 package version with the generated Windows updater payload.
+The container is stateless. It queries Action1 each run, finds or creates the package named by `PACKAGE_NAME`, detects the highest Autodesk Fusion build reported in Action1 installed software inventory, then creates or completes the corresponding Action1 package version with the generated Windows updater payload. Payload filenames include a short content hash, so publishing a new updater image can refresh the existing Action1 version even when Autodesk's Fusion build number has not changed.
 
 One-shot mode is the default:
 

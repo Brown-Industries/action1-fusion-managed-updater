@@ -138,16 +138,99 @@ function New-Action1UploadPutHeaders {
     }
 }
 
+function Get-Action1VersionWindowsPayloadFileName {
+    param($VersionRecord)
+
+    if ($null -eq $VersionRecord) { return '' }
+    $fileNameProperty = $VersionRecord.PSObject.Properties['file_name']
+    if (-not $fileNameProperty -or $null -eq $fileNameProperty.Value) { return '' }
+
+    $windowsFile = $null
+    if ($fileNameProperty.Value -is [Collections.IDictionary]) {
+        $windowsFile = $fileNameProperty.Value['Windows_64']
+    }
+    else {
+        $windowsProperty = $fileNameProperty.Value.PSObject.Properties['Windows_64']
+        if ($windowsProperty) {
+            $windowsFile = $windowsProperty.Value
+        }
+    }
+
+    if ($null -eq $windowsFile) { return '' }
+    if ($windowsFile -is [Collections.IDictionary]) {
+        return [string]$windowsFile['name']
+    }
+
+    $nameProperty = $windowsFile.PSObject.Properties['name']
+    if ($nameProperty) {
+        return [string]$nameProperty.Value
+    }
+
+    return ''
+}
+
+function Test-Action1PackageVersionUsesPayloadFileName {
+    param(
+        $VersionRecord,
+        [string]$PayloadFileName = ''
+    )
+
+    if ([string]::IsNullOrWhiteSpace($PayloadFileName)) { return $true }
+    $currentFileName = Get-Action1VersionWindowsPayloadFileName -VersionRecord $VersionRecord
+    return $currentFileName -eq $PayloadFileName
+}
+
+function New-Action1PayloadFileName {
+    param(
+        [Parameter(Mandatory = $true)][string]$PayloadPath,
+        [string]$BaseName = 'FusionManagedUpdater'
+    )
+
+    $hash = Get-FileHash -LiteralPath $PayloadPath -Algorithm SHA256
+    $extension = [IO.Path]::GetExtension($PayloadPath)
+    if ([string]::IsNullOrWhiteSpace($extension)) {
+        $extension = '.ps1'
+    }
+    return "$BaseName-$($hash.Hash.Substring(0, 12).ToLowerInvariant())$extension"
+}
+
 function Resolve-Action1VersionSyncAction {
     param(
         [Parameter(Mandatory = $true)]$Package,
-        [Parameter(Mandatory = $true)][string]$BuildVersion
+        [Parameter(Mandatory = $true)][string]$BuildVersion,
+        [string]$PayloadFileName = ''
     )
 
     $record = Get-Action1PackageVersionRecord -Package $Package -BuildVersion $BuildVersion
     if ($null -eq $record) { return 'CreateAndUpload' }
-    if (Test-Action1PackageVersionHasWindowsBinary -VersionRecord $record) { return 'NoOp' }
+    if (Test-Action1PackageVersionHasWindowsBinary -VersionRecord $record) {
+        if (-not (Test-Action1PackageVersionUsesPayloadFileName -VersionRecord $record -PayloadFileName $PayloadFileName)) {
+            return 'UploadCurrentPayload'
+        }
+        return 'NoOp'
+    }
     return 'UploadMissingBinary'
+}
+
+function Set-Action1RepositoryVersionPayloadFileName {
+    param(
+        [Parameter(Mandatory = $true)][string]$BaseUrl,
+        [Parameter(Mandatory = $true)][string]$OrgId,
+        [Parameter(Mandatory = $true)][string]$PackageId,
+        [Parameter(Mandatory = $true)][string]$VersionId,
+        [Parameter(Mandatory = $true)][string]$AccessToken,
+        [Parameter(Mandatory = $true)][string]$PayloadFileName
+    )
+
+    $body = @{
+        file_name = @{
+            Windows_64 = @{
+                name = $PayloadFileName
+                type = 'cloud'
+            }
+        }
+    }
+    return Invoke-Action1JsonApi -Method 'PATCH' -BaseUrl $BaseUrl -AccessToken $AccessToken -Path "/software-repository/$OrgId/$PackageId/versions/$VersionId" -Body $body
 }
 
 function New-Action1RepositoryVersion {
@@ -296,4 +379,4 @@ function Send-Action1VersionPayload {
     }
 }
 
-Export-ModuleMember -Function New-Action1TokenRequestBody, Select-Action1PackageByExactName, Get-Action1AccessToken, Invoke-Action1JsonApi, Ensure-Action1PackageByName, New-Action1UploadInitHeaders, New-Action1UploadPutHeaders, Resolve-Action1VersionSyncAction, New-Action1RepositoryVersion, Send-Action1VersionPayload
+Export-ModuleMember -Function New-Action1TokenRequestBody, Select-Action1PackageByExactName, Get-Action1AccessToken, Invoke-Action1JsonApi, Ensure-Action1PackageByName, New-Action1UploadInitHeaders, New-Action1UploadPutHeaders, Get-Action1VersionWindowsPayloadFileName, Test-Action1PackageVersionUsesPayloadFileName, New-Action1PayloadFileName, Resolve-Action1VersionSyncAction, Set-Action1RepositoryVersionPayloadFileName, New-Action1RepositoryVersion, Send-Action1VersionPayload

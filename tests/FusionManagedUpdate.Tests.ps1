@@ -615,6 +615,30 @@ $recordedWithBinary = [pscustomobject]@{
 }
 Assert-Equal (Resolve-Action1VersionSyncAction -Package $recordedWithBinary -BuildVersion '2702.1.58') 'NoOp' 'Version sync no-ops when binary exists'
 
+$recordedWithCurrentPayload = [pscustomobject]@{
+    versions = @(
+        [pscustomobject]@{
+            id        = 'version-1'
+            version   = '2702.1.58'
+            binary_id = [pscustomobject]@{ Windows_64 = 'binary-1' }
+            file_name = [pscustomobject]@{ Windows_64 = [pscustomobject]@{ name = 'FusionManagedUpdater-current.ps1'; type = 'cloud' } }
+        }
+    )
+}
+Assert-Equal (Resolve-Action1VersionSyncAction -Package $recordedWithCurrentPayload -BuildVersion '2702.1.58' -PayloadFileName 'FusionManagedUpdater-current.ps1') 'NoOp' 'Version sync no-ops when binary and payload filename are current'
+
+$recordedWithStalePayload = [pscustomobject]@{
+    versions = @(
+        [pscustomobject]@{
+            id        = 'version-1'
+            version   = '2702.1.58'
+            binary_id = [pscustomobject]@{ Windows_64 = 'binary-1' }
+            file_name = [pscustomobject]@{ Windows_64 = [pscustomobject]@{ name = 'FusionManagedUpdater-old.ps1'; type = 'cloud' } }
+        }
+    )
+}
+Assert-Equal (Resolve-Action1VersionSyncAction -Package $recordedWithStalePayload -BuildVersion '2702.1.58' -PayloadFileName 'FusionManagedUpdater-current.ps1') 'UploadCurrentPayload' 'Version sync refreshes existing version when payload filename is stale'
+
 $recordedWithoutBinary = [pscustomobject]@{
     versions = @([pscustomobject]@{ id = 'version-1'; version = '2702.1.58' })
 }
@@ -694,11 +718,12 @@ try {
     $syncDefaultPayload = Join-Path $repoRoot 'dist/FusionManagedUpdater.ps1'
     $syncPayloadBuild = Invoke-PayloadBuilder -OutputPath $syncDefaultPayload
     Assert-Equal $syncPayloadBuild.ExitCode 0 'Stateless sync default payload is generated for tests'
+    $syncPayloadFileName = New-Action1PayloadFileName -PayloadPath $syncDefaultPayload
 
     Set-Content -LiteralPath (Join-Path $syncTempRoot 'token.json') -Encoding ASCII -Value '{"access_token":"offline-token"}'
     Set-Content -LiteralPath (Join-Path $syncTempRoot 'packages.json') -Encoding ASCII -Value '{"items":[{"id":"pkg-1","name":"Autodesk Fusion Managed Updater"}]}'
     Set-Content -LiteralPath (Join-Path $syncTempRoot 'installed-software.json') -Encoding ASCII -Value ($inventory | ConvertTo-Json -Depth 20 -Compress)
-    Set-Content -LiteralPath (Join-Path $syncTempRoot 'package.json') -Encoding ASCII -Value '{"id":"pkg-1","versions":[{"id":"version-1","version":"2702.1.58","binary_id":{"Windows_64":"binary-1"}}]}'
+    Set-Content -LiteralPath (Join-Path $syncTempRoot 'package.json') -Encoding ASCII -Value (@{ id = 'pkg-1'; versions = @(@{ id = 'version-1'; version = '2702.1.58'; binary_id = @{ Windows_64 = 'binary-1' }; file_name = @{ Windows_64 = @{ name = $syncPayloadFileName; type = 'cloud' } } }) } | ConvertTo-Json -Depth 8 -Compress)
 
     $env:ACTION1_CLIENT_ID = 'client-id'
     $env:ACTION1_CLIENT_SECRET = 'client-secret'
@@ -711,6 +736,15 @@ try {
     Assert-Equal $noOpResult.ExitCode 0 'Stateless sync exits 0 when version is already recorded'
     Assert-True ($noOpResult.Output -like '*already recorded*') 'Stateless sync reports already-recorded version'
 
+    Set-Content -LiteralPath (Join-Path $syncTempRoot 'package.json') -Encoding ASCII -Value '{"id":"pkg-1","versions":[{"id":"version-1","version":"2702.1.58","binary_id":{"Windows_64":"binary-1"},"file_name":{"Windows_64":{"name":"FusionManagedUpdater-old.ps1","type":"cloud"}}}]}'
+    Remove-Item -LiteralPath (Join-Path $syncTempRoot 'api-requests.log') -ErrorAction SilentlyContinue
+    $stalePayloadResult = Invoke-SyncScript -Arguments @('-OfflineFixtureRoot', $syncTempRoot, '-PayloadPath', $syncDefaultPayload)
+    Assert-Equal $stalePayloadResult.ExitCode 0 'Stateless sync exits 0 after refreshing stale payload binary'
+    Assert-True ($stalePayloadResult.Output -like '*Uploaded current Action1 payload for Fusion history version 2702.1.58*') 'Stateless sync reports current payload upload'
+    $stalePayloadRequests = @(Get-Content -LiteralPath (Join-Path $syncTempRoot 'api-requests.log'))
+    Assert-True ($stalePayloadRequests -contains 'PATCH /software-repository/all/pkg-1/versions/version-1') 'Stateless sync patches existing version payload file name'
+    Assert-True ($stalePayloadRequests -contains 'UPLOAD /software-repository/all/pkg-1/versions/version-1/upload') 'Stateless sync uploads stale existing version payload'
+
     Set-Content -LiteralPath (Join-Path $syncTempRoot 'package.json') -Encoding ASCII -Value '{"id":"pkg-1","versions":[]}'
     Remove-Item -LiteralPath (Join-Path $syncTempRoot 'api-requests.log') -ErrorAction SilentlyContinue
     $createResult = Invoke-SyncScript -Arguments @('-OfflineFixtureRoot', $syncTempRoot, '-PayloadPath', (Join-Path $repoRoot 'dist/FusionManagedUpdater.ps1'))
@@ -722,7 +756,7 @@ try {
     Assert-True ($createRequests -contains 'UPLOAD /software-repository/all/pkg-1/versions/2702.1.58_offline/upload') 'Stateless sync create flow uploads created version payload'
 
     Set-Content -LiteralPath (Join-Path $syncTempRoot 'package.json') -Encoding ASCII -Value '{"id":"pkg-1","versions":[{"id":"version-1","version":"2702.1.58"}]}'
-    Set-Content -LiteralPath (Join-Path $syncTempRoot 'version-detail.json') -Encoding ASCII -Value '{"id":"version-1","version":"2702.1.58","binary_id":{"Windows_64":"binary-1"}}'
+    Set-Content -LiteralPath (Join-Path $syncTempRoot 'version-detail.json') -Encoding ASCII -Value (@{ id = 'version-1'; version = '2702.1.58'; binary_id = @{ Windows_64 = 'binary-1' }; file_name = @{ Windows_64 = @{ name = $syncPayloadFileName; type = 'cloud' } } } | ConvertTo-Json -Depth 8 -Compress)
     Remove-Item -LiteralPath (Join-Path $syncTempRoot 'api-requests.log') -ErrorAction SilentlyContinue
     $detailNoOpResult = Invoke-SyncScript -Arguments @('-OfflineFixtureRoot', $syncTempRoot)
     Assert-Equal $detailNoOpResult.ExitCode 0 'Stateless sync exits 0 when version detail confirms uploaded payload'

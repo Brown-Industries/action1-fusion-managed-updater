@@ -18,6 +18,7 @@ if (-not $PayloadPath) {
 if (-not (Test-Path -LiteralPath $PayloadPath)) {
     throw "Action1 payload was not found: $PayloadPath"
 }
+$payloadFileName = New-Action1PayloadFileName -PayloadPath $PayloadPath
 
 function Read-OfflineJson {
     param([Parameter(Mandatory = $true)][string]$Name)
@@ -74,7 +75,7 @@ catch {
     }
     throw
 }
-$syncAction = Resolve-Action1VersionSyncAction -Package $packageDetails -BuildVersion $buildVersion
+$syncAction = Resolve-Action1VersionSyncAction -Package $packageDetails -BuildVersion $buildVersion -PayloadFileName $payloadFileName
 
 if ($syncAction -eq 'NoOp') {
     Write-Host "Action1 Fusion history version for $buildVersion is already recorded with an uploaded payload."
@@ -83,7 +84,7 @@ if ($syncAction -eq 'NoOp') {
 
 $existingRecord = $null
 $versionId = $null
-if ($syncAction -eq 'UploadMissingBinary') {
+if ($syncAction -in @('UploadMissingBinary', 'UploadCurrentPayload')) {
     $existingRecord = Get-Action1PackageVersionRecord -Package $packageDetails -BuildVersion $buildVersion
     $versionId = $existingRecord.id
     if ([string]::IsNullOrWhiteSpace([string]$versionId)) {
@@ -100,14 +101,16 @@ if ($syncAction -eq 'UploadMissingBinary') {
         $versionDetail = Invoke-Action1JsonApi -Method 'GET' -BaseUrl $config.Action1BaseUrl -AccessToken $accessToken -Path "/software-repository/$($config.Action1OrgId)/$($package.id)/versions/$versionId"
     }
 
-    if ($null -ne $versionDetail -and (Test-Action1PackageVersionHasWindowsBinary -VersionRecord $versionDetail)) {
+    if ($null -ne $versionDetail -and
+        (Test-Action1PackageVersionHasWindowsBinary -VersionRecord $versionDetail) -and
+        (Test-Action1PackageVersionUsesPayloadFileName -VersionRecord $versionDetail -PayloadFileName $payloadFileName)) {
         Write-Host "Action1 Fusion history version for $buildVersion is already recorded with an uploaded payload."
         exit 0
     }
 }
 
 if ($syncAction -eq 'CreateAndUpload') {
-    $body = New-Action1FusionVersionBody -BuildVersion $buildVersion -DetectedDate (Get-Date).ToString('yyyy-MM-dd') -PayloadFileName 'FusionManagedUpdater.ps1'
+    $body = New-Action1FusionVersionBody -BuildVersion $buildVersion -DetectedDate (Get-Date).ToString('yyyy-MM-dd') -PayloadFileName $payloadFileName
     if ($OfflineFixtureRoot) {
         Write-OfflineRequest -Line "POST /software-repository/$($config.Action1OrgId)/$($package.id)/versions"
         if (Test-OfflineJson -Name 'created-version-response.json') {
@@ -129,6 +132,12 @@ else {
     if ([string]::IsNullOrWhiteSpace([string]$versionId)) {
         throw "Action1 package version record for Fusion build $buildVersion did not include an id."
     }
+    if ($OfflineFixtureRoot) {
+        Write-OfflineRequest -Line "PATCH /software-repository/$($config.Action1OrgId)/$($package.id)/versions/$versionId"
+    }
+    else {
+        [void](Set-Action1RepositoryVersionPayloadFileName -BaseUrl $config.Action1BaseUrl -OrgId $config.Action1OrgId -PackageId $package.id -VersionId $versionId -AccessToken $accessToken -PayloadFileName $payloadFileName)
+    }
 }
 
 if ($OfflineFixtureRoot) {
@@ -140,10 +149,16 @@ else {
     if (-not (Test-Action1PackageVersionHasWindowsBinary -VersionRecord $confirmedVersion)) {
         throw "Action1 version $versionId did not report binary_id.Windows_64 after upload."
     }
+    if (-not (Test-Action1PackageVersionUsesPayloadFileName -VersionRecord $confirmedVersion -PayloadFileName $payloadFileName)) {
+        throw "Action1 version $versionId did not report expected Windows payload file name '$payloadFileName' after upload."
+    }
 }
 
 if ($syncAction -eq 'UploadMissingBinary') {
     Write-Host "Uploaded missing Action1 payload for Fusion history version $buildVersion."
+}
+elseif ($syncAction -eq 'UploadCurrentPayload') {
+    Write-Host "Uploaded current Action1 payload for Fusion history version $buildVersion."
 }
 else {
     Write-Host "Created Action1 Fusion history version for $buildVersion and uploaded payload."
