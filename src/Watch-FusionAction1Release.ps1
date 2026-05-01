@@ -94,7 +94,7 @@ else {
 $detectedDate = (Get-Date).ToString('yyyy-MM-dd')
 $manualBuildVersion = if ($env:FUSION_OBSERVED_BUILD_VERSION) { $env:FUSION_OBSERVED_BUILD_VERSION.Trim() } else { '' }
 $buildVersion = if ($manualBuildVersion) { $manualBuildVersion } else { 'unknown-dry-run' }
-$dryRunResult = New-FusionWatcherDryRunResult -State $state -AutodeskHead $head -BuildVersion $buildVersion -DetectedDate $detectedDate -PayloadFileName 'FusionManagedUpdater.cmd'
+$dryRunResult = New-FusionWatcherDryRunResult -State $state -AutodeskHead $head -BuildVersion $buildVersion -DetectedDate $detectedDate -PayloadFileName 'FusionManagedUpdater.ps1'
 $changed = $dryRunResult.Changed
 $body = $dryRunResult.Action1VersionBody
 
@@ -120,7 +120,7 @@ else {
     $inventory = Invoke-Action1Api -Method GET -Path "/installed-software/$OrgId/data?filter=$inventoryFilter&limit=1000"
     $buildVersion = Resolve-FusionWatcherBuildVersion -Inventory $inventory -ManualBuildVersion $manualBuildVersion
 }
-$body = New-Action1FusionVersionBody -BuildVersion $buildVersion -DetectedDate $detectedDate -PayloadFileName 'FusionManagedUpdater.cmd'
+$body = New-Action1FusionVersionBody -BuildVersion $buildVersion -DetectedDate $detectedDate -PayloadFileName 'FusionManagedUpdater.ps1'
 
 $package = Invoke-Action1Api -Method GET -Path "/software-repository/$OrgId/$PackageId?fields=versions"
 if (-not (Test-Action1PackageVersionContainerPresent -Package $package)) {

@@ -1,3 +1,4 @@
 .worktrees/
 dist/*.cmd
+dist/*.ps1
 state/*.json

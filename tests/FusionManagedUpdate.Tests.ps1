@@ -136,7 +136,7 @@ function Invoke-Payload {
     $previousErrorActionPreference = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $output = & $PayloadPath @Arguments 2>&1
+        $output = & $testPowerShell -NoProfile -ExecutionPolicy Bypass -File $PayloadPath @Arguments 2>&1
     }
     finally {
         $ErrorActionPreference = $previousErrorActionPreference
@@ -186,15 +186,16 @@ $warning = New-HistoricalVersionWarning -BuildVersion '2702.1.58' -DetectedDate 
 Assert-True ($warning -like '*historical build*') 'Warning says historical builds are not pinned installers'
 Assert-True ($warning -like '*currently available Fusion build*') 'Warning says Autodesk controls currently available build'
 
-$versionBody = New-Action1FusionVersionBody -BuildVersion '2702.1.58' -DetectedDate '2026-04-30' -PayloadFileName 'FusionManagedUpdater.cmd'
+$versionBody = New-Action1FusionVersionBody -BuildVersion '2702.1.58' -DetectedDate '2026-04-30' -PayloadFileName 'FusionManagedUpdater.ps1'
 Assert-Equal $versionBody.version '2702.1.58' 'Action1 version body uses Fusion build version'
 Assert-Equal $versionBody.app_name_match '^Autodesk Fusion(?: 360)?$' 'Action1 version body matches current and legacy Fusion names'
 Assert-True (-not $versionBody.Contains('description')) 'Action1 version body omits non-settable description field'
 Assert-True (-not $versionBody.Contains('internal_notes')) 'Action1 version body omits non-settable internal notes field'
-Assert-Equal $versionBody.install_type 'other' 'Action1 CMD payload uses Other installation type'
-Assert-Equal $versionBody.silent_install_switches 'FusionManagedUpdater.cmd' 'Action1 Other payload names CMD launcher in silent install switches'
+Assert-Equal $versionBody.install_type 'exe' 'Action1 PowerShell payload uses non-MSI API installation type'
+Assert-Equal $versionBody.silent_install_switches '' 'Action1 single-file payload does not pass itself as an install switch'
 Assert-Equal $versionBody.success_exit_codes '0' 'Action1 success exit code is zero'
-Assert-Equal $versionBody.reboot_exit_codes '1641,3010' 'Action1 version body uses default reboot exit codes'
+Assert-Equal $versionBody.reboot_exit_codes '1,1641,3010' 'Action1 version body uses deployable reboot exit codes'
+Assert-Equal $versionBody.EULA_accepted 'no' 'Action1 version body initializes EULA metadata for custom package deployment'
 
 $containerConfig = Get-FusionContainerRuntimeConfig -Environment @{
     ACTION1_CLIENT_ID = 'client-id'
@@ -522,7 +523,7 @@ finally {
     }
 }
 
-$unchangedDryRun = New-FusionWatcherDryRunResult -State $autodeskHead -AutodeskHead $autodeskHead -BuildVersion '2702.1.58' -DetectedDate '2026-04-30' -PayloadFileName 'FusionManagedUpdater.cmd'
+$unchangedDryRun = New-FusionWatcherDryRunResult -State $autodeskHead -AutodeskHead $autodeskHead -BuildVersion '2702.1.58' -DetectedDate '2026-04-30' -PayloadFileName 'FusionManagedUpdater.ps1'
 Assert-Equal $unchangedDryRun.Changed $false 'Fusion watcher dry-run result reports unchanged installer state'
 Assert-Equal $unchangedDryRun.AutodeskHead.ETag $autodeskHead.ETag 'Fusion watcher dry-run result includes Autodesk HEAD when unchanged'
 Assert-Equal $unchangedDryRun.Action1VersionBody.version '2702.1.58' 'Fusion watcher dry-run result includes Action1 version body when unchanged'
@@ -690,6 +691,10 @@ $previousAction1ClientSecret = $env:ACTION1_CLIENT_SECRET
 $previousPackageName = $env:PACKAGE_NAME
 try {
     New-Item -ItemType Directory -Path $syncTempRoot -Force | Out-Null
+    $syncDefaultPayload = Join-Path $repoRoot 'dist/FusionManagedUpdater.ps1'
+    $syncPayloadBuild = Invoke-PayloadBuilder -OutputPath $syncDefaultPayload
+    Assert-Equal $syncPayloadBuild.ExitCode 0 'Stateless sync default payload is generated for tests'
+
     Set-Content -LiteralPath (Join-Path $syncTempRoot 'token.json') -Encoding ASCII -Value '{"access_token":"offline-token"}'
     Set-Content -LiteralPath (Join-Path $syncTempRoot 'packages.json') -Encoding ASCII -Value '{"items":[{"id":"pkg-1","name":"Autodesk Fusion Managed Updater"}]}'
     Set-Content -LiteralPath (Join-Path $syncTempRoot 'installed-software.json') -Encoding ASCII -Value ($inventory | ConvertTo-Json -Depth 20 -Compress)
@@ -700,7 +705,7 @@ try {
     $env:PACKAGE_NAME = 'Autodesk Fusion Managed Updater'
 
     $syncScriptText = Get-Content -LiteralPath $syncScript -Raw
-    Assert-True (-not $syncScriptText.Contains("'..\dist\FusionManagedUpdater.cmd'")) 'Stateless sync default payload path is built from portable path components'
+    Assert-True (-not $syncScriptText.Contains("'..\dist\FusionManagedUpdater.ps1'")) 'Stateless sync default payload path is built from portable path components'
 
     $noOpResult = Invoke-SyncScript -Arguments @('-OfflineFixtureRoot', $syncTempRoot)
     Assert-Equal $noOpResult.ExitCode 0 'Stateless sync exits 0 when version is already recorded'
@@ -708,7 +713,7 @@ try {
 
     Set-Content -LiteralPath (Join-Path $syncTempRoot 'package.json') -Encoding ASCII -Value '{"id":"pkg-1","versions":[]}'
     Remove-Item -LiteralPath (Join-Path $syncTempRoot 'api-requests.log') -ErrorAction SilentlyContinue
-    $createResult = Invoke-SyncScript -Arguments @('-OfflineFixtureRoot', $syncTempRoot, '-PayloadPath', (Join-Path $repoRoot 'dist/FusionManagedUpdater.cmd'))
+    $createResult = Invoke-SyncScript -Arguments @('-OfflineFixtureRoot', $syncTempRoot, '-PayloadPath', (Join-Path $repoRoot 'dist/FusionManagedUpdater.ps1'))
     Assert-Equal $createResult.ExitCode 0 'Stateless sync exits 0 after creating and uploading missing version'
     Assert-True ($createResult.Output -like '*Created Action1 Fusion history version for 2702.1.58*') 'Stateless sync reports created version'
     $createRequests = @(Get-Content -LiteralPath (Join-Path $syncTempRoot 'api-requests.log'))
@@ -787,7 +792,7 @@ finally {
 }
 
 $payloadTempRoot = Join-Path $env:TEMP ('fmu-payload-test-' + [guid]::NewGuid().ToString('N'))
-$payloadOutput = Join-Path $payloadTempRoot 'FusionManagedUpdater.cmd'
+$payloadOutput = Join-Path $payloadTempRoot 'FusionManagedUpdater.ps1'
 try {
     $payloadResult = Invoke-PayloadBuilder -OutputPath $payloadOutput
     Assert-Equal $payloadResult.ExitCode 0 'Action1 payload builder exits 0'
@@ -799,11 +804,12 @@ try {
     Assert-True ($payloadBytes.Length -lt 1MB) 'Action1 payload is under 1 MB'
 
     $payloadText = Get-Content -LiteralPath $payloadOutput -Raw
-    Assert-True ($payloadText -like '*set "moduleb64=%work%\module.b64"*') 'Action1 payload defines module base64 path'
-    Assert-True ($payloadText -like '*set "scriptb64=%work%\script.b64"*') 'Action1 payload defines script base64 path'
+    Assert-True ($payloadText -like '*$moduleb64 = @(*') 'Action1 payload defines module base64 chunks'
+    Assert-True ($payloadText -like '*$scriptb64 = @(*') 'Action1 payload defines script base64 chunks'
     Assert-True ($payloadText.Contains('[Convert]::FromBase64String')) 'Action1 payload decodes embedded files'
-    Assert-True ($payloadText -like '*powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ps1%" %**') 'Action1 payload forwards launcher arguments to extracted endpoint script'
-    Assert-True ($payloadText -like '*exit /b %code%*') 'Action1 payload exits with endpoint exit code'
+    Assert-True (-not ($payloadText -like '*>> "%*b64%" echo *')) 'Action1 payload does not rely on CMD echo for Base64 extraction'
+    Assert-True ($payloadText -like '*powershell.exe'' -NoProfile -ExecutionPolicy Bypass -File $ps1 @args*') 'Action1 payload forwards launcher arguments to extracted endpoint script'
+    Assert-True ($payloadText -like '*exit $exitCode*') 'Action1 payload exits with endpoint exit code'
     Assert-True ($payloadResult.Output -like '*bytes*') 'Action1 payload builder reports payload size'
 
     $missingPayloadRoot = Join-Path $payloadTempRoot 'missing-webdeploy-root'

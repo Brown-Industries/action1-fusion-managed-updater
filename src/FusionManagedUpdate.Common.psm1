@@ -94,10 +94,11 @@ function New-Action1FusionVersionBody {
         app_name_match          = '^Autodesk Fusion(?: 360)?$'
         release_date            = $DetectedDate
         security_severity       = 'Unspecified'
-        silent_install_switches = $PayloadFileName
+        silent_install_switches = ''
         success_exit_codes      = '0'
-        reboot_exit_codes       = '1641,3010'
-        install_type            = 'other'
+        reboot_exit_codes       = '1,1641,3010'
+        install_type            = 'exe'
+        EULA_accepted           = 'no'
         update_type             = 'Regular Updates'
         os                      = @('Windows 10', 'Windows 11')
         file_name               = @{ Windows_64 = @{ name = $PayloadFileName; type = 'cloud' } }

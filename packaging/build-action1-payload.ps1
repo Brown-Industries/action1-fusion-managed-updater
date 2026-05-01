@@ -16,7 +16,7 @@ if (-not $CommonModule) {
 }
 
 if (-not $OutputPath) {
-    $OutputPath = Join-Path $repoRoot 'dist\FusionManagedUpdater.cmd'
+    $OutputPath = Join-Path $repoRoot 'dist\FusionManagedUpdater.ps1'
 }
 
 $outputDir = Split-Path -Parent $OutputPath
@@ -28,32 +28,41 @@ $moduleText = Get-Content -LiteralPath $CommonModule -Raw
 $scriptText = Get-Content -LiteralPath $SourceScript -Raw
 $moduleEncoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($moduleText))
 $scriptEncoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($scriptText))
-$moduleLines = $moduleEncoded -split '(.{1,7000})' | Where-Object { $_ }
-$scriptLines = $scriptEncoded -split '(.{1,7000})' | Where-Object { $_ }
-$cmd = New-Object System.Collections.Generic.List[string]
-$cmd.Add('@echo off')
-$cmd.Add('setlocal EnableExtensions')
-$cmd.Add('set "work=%TEMP%\FusionManagedUpdater-%RANDOM%%RANDOM%"')
-$cmd.Add('mkdir "%work%" >nul 2>nul')
-$cmd.Add('set "moduleb64=%work%\module.b64"')
-$cmd.Add('set "scriptb64=%work%\script.b64"')
-$cmd.Add('set "module=%work%\FusionManagedUpdate.Common.psm1"')
-$cmd.Add('set "ps1=%work%\Invoke-FusionManagedUpdate.ps1"')
-$cmd.Add('break > "%moduleb64%"')
+$moduleLines = $moduleEncoded -split '(.{1,1000})' | Where-Object { $_ }
+$scriptLines = $scriptEncoded -split '(.{1,1000})' | Where-Object { $_ }
+$payload = New-Object System.Collections.Generic.List[string]
+$payload.Add('$ErrorActionPreference = ''Stop''')
+$payload.Add('$work = Join-Path $env:TEMP (''FusionManagedUpdater-'' + [guid]::NewGuid().ToString(''N''))')
+$payload.Add('New-Item -ItemType Directory -Path $work -Force | Out-Null')
+$payload.Add('$module = Join-Path $work ''FusionManagedUpdate.Common.psm1''')
+$payload.Add('$ps1 = Join-Path $work ''Invoke-FusionManagedUpdate.ps1''')
+$payload.Add('$exitCode = 1')
+$payload.Add('$moduleb64 = @(')
 foreach ($line in $moduleLines) {
-    $cmd.Add(">> `"%moduleb64%`" echo $line")
+    $payload.Add("    '$line'")
 }
-$cmd.Add('break > "%scriptb64%"')
+$payload.Add(') -join ''''')
+$payload.Add('$scriptb64 = @(')
 foreach ($line in $scriptLines) {
-    $cmd.Add(">> `"%scriptb64%`" echo $line")
+    $payload.Add("    '$line'")
 }
-$cmd.Add('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "[IO.File]::WriteAllBytes($env:module, [Convert]::FromBase64String((Get-Content -LiteralPath $env:moduleb64 -Raw))); [IO.File]::WriteAllBytes($env:ps1, [Convert]::FromBase64String((Get-Content -LiteralPath $env:scriptb64 -Raw)))"')
-$cmd.Add('powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ps1%" %*')
-$cmd.Add('set "code=%ERRORLEVEL%"')
-$cmd.Add('rmdir /s /q "%work%" >nul 2>nul')
-$cmd.Add('exit /b %code%')
+$payload.Add(') -join ''''')
+$payload.Add('try {')
+$payload.Add('    [IO.File]::WriteAllBytes($module, [Convert]::FromBase64String($moduleb64))')
+$payload.Add('    [IO.File]::WriteAllBytes($ps1, [Convert]::FromBase64String($scriptb64))')
+$payload.Add('    & ''powershell.exe'' -NoProfile -ExecutionPolicy Bypass -File $ps1 @args')
+$payload.Add('    $exitCode = if ($null -eq $LASTEXITCODE) { 0 } else { $LASTEXITCODE }')
+$payload.Add('}')
+$payload.Add('catch {')
+$payload.Add('    Write-Error $_ -ErrorAction Continue')
+$payload.Add('    $exitCode = 1')
+$payload.Add('}')
+$payload.Add('finally {')
+$payload.Add('    if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue }')
+$payload.Add('}')
+$payload.Add('exit $exitCode')
 
-Set-Content -LiteralPath $OutputPath -Value $cmd -Encoding ASCII
+Set-Content -LiteralPath $OutputPath -Value $payload -Encoding ASCII
 $payloadSize = (Get-Item -LiteralPath $OutputPath).Length
 if ($payloadSize -ge 1MB) {
     throw "Action1 payload is $payloadSize bytes, which must be under 1048576 bytes: $OutputPath"

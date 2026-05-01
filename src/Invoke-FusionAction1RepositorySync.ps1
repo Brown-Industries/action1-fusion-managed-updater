@@ -13,7 +13,7 @@ Import-Module $action1ModulePath -Force
 
 if (-not $PayloadPath) {
     $repoRoot = Split-Path -Parent $PSScriptRoot
-    $PayloadPath = Join-Path (Join-Path $repoRoot 'dist') 'FusionManagedUpdater.cmd'
+    $PayloadPath = Join-Path (Join-Path $repoRoot 'dist') 'FusionManagedUpdater.ps1'
 }
 if (-not (Test-Path -LiteralPath $PayloadPath)) {
     throw "Action1 payload was not found: $PayloadPath"
@@ -107,7 +107,7 @@ if ($syncAction -eq 'UploadMissingBinary') {
 }
 
 if ($syncAction -eq 'CreateAndUpload') {
-    $body = New-Action1FusionVersionBody -BuildVersion $buildVersion -DetectedDate (Get-Date).ToString('yyyy-MM-dd') -PayloadFileName 'FusionManagedUpdater.cmd'
+    $body = New-Action1FusionVersionBody -BuildVersion $buildVersion -DetectedDate (Get-Date).ToString('yyyy-MM-dd') -PayloadFileName 'FusionManagedUpdater.ps1'
     if ($OfflineFixtureRoot) {
         Write-OfflineRequest -Line "POST /software-repository/$($config.Action1OrgId)/$($package.id)/versions"
         if (Test-OfflineJson -Name 'created-version-response.json') {
