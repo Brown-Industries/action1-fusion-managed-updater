@@ -200,6 +200,16 @@ function Test-Action1SuccessStatusCode {
     return ($status -ge 200 -and $status -lt 300)
 }
 
+function Test-Action1UploadInitStatusCode {
+    param([object]$StatusCode)
+
+    $status = 0
+    if (-not [int]::TryParse([string]$StatusCode, [ref]$status)) {
+        return $false
+    }
+    return ((Test-Action1SuccessStatusCode -StatusCode $status) -or $status -eq 308)
+}
+
 function Assert-Action1UploadLocationAllowed {
     param(
         [Parameter(Mandatory = $true)][string]$BaseUrl,
@@ -248,12 +258,23 @@ function Send-Action1VersionPayload {
         if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
             $statusCode = [int]$_.Exception.Response.StatusCode
         }
+        if ($statusCode -eq 308 -and $_.Exception.Response) {
+            $initResponse = [pscustomobject]@{
+                StatusCode = $statusCode
+                Headers    = $_.Exception.Response.Headers
+            }
+        }
+        elseif ($null -ne $statusCode) {
+            throw "Action1 upload init failed for package '$PackageId' version '$VersionId' with status code $statusCode."
+        }
+        else {
+            throw "Action1 upload init failed for package '$PackageId' version '$VersionId'."
+        }
+    }
+    if (-not (Test-Action1UploadInitStatusCode -StatusCode $initResponse.StatusCode)) {
         if ($null -ne $statusCode) {
             throw "Action1 upload init failed for package '$PackageId' version '$VersionId' with status code $statusCode."
         }
-        throw "Action1 upload init failed for package '$PackageId' version '$VersionId'."
-    }
-    if (-not (Test-Action1SuccessStatusCode -StatusCode $initResponse.StatusCode)) {
         throw "Action1 upload initialization failed for package '$PackageId' version '$VersionId' with status code $($initResponse.StatusCode)."
     }
 

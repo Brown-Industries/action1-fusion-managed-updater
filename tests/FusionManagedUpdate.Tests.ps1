@@ -492,12 +492,13 @@ try {
             Method      = $Method
             UriHost     = ([uri]$Uri).Host
             UriPath     = ([uri]$Uri).AbsolutePath
+            UriQuery    = ([uri]$Uri).Query
             Headers     = $Headers
             ContentType = $ContentType
             Body        = $Body
         }
         if ($Method -eq 'POST') {
-            return [pscustomobject]@{ StatusCode = 200; Headers = @{ 'X-Upload-Location' = 'https://action1.invalid/api/3.0/upload/session-1' } }
+            return [pscustomobject]@{ StatusCode = 308; Headers = @{ 'X-Upload-Location' = 'https://action1.invalid/api/3.0/upload/session-1?upload_id=upload-1&platform=Windows_64' } }
         }
         return [pscustomobject]@{ StatusCode = 200; Headers = @{} }
     }
@@ -508,6 +509,7 @@ try {
     Assert-Equal $successfulUploadCalls[0].Headers.'X-Upload-Content-Length' '3' 'Version payload upload init sends payload length'
     Assert-Equal $successfulUploadCalls[1].Method 'PUT' 'Version payload upload sends payload with PUT'
     Assert-Equal $successfulUploadCalls[1].UriHost 'action1.invalid' 'Version payload upload PUT uses allowed host'
+    Assert-Equal $successfulUploadCalls[1].UriQuery '?upload_id=upload-1&platform=Windows_64' 'Version payload upload PUT uses Action1 upload session query'
     Assert-Equal $successfulUploadCalls[1].Headers.Authorization 'Bearer secret-token' 'Version payload upload PUT sends bearer token'
     Assert-Equal $successfulUploadCalls[1].Headers.'Content-Range' 'bytes 0-2/3' 'Version payload upload PUT sends content range'
     Assert-Equal ([string]::Join(',', $successfulUploadCalls[1].Body)) '65,66,67' 'Version payload upload sends payload bytes'
@@ -581,6 +583,19 @@ $packageWithoutBinary = [pscustomobject]@{
 }
 $missingBinaryRecord = Get-Action1PackageVersionRecord -Package $packageWithoutBinary -BuildVersion '2702.1.58'
 Assert-True (-not (Test-Action1PackageVersionHasWindowsBinary -VersionRecord $missingBinaryRecord)) 'Version binary helper reports missing Windows binary'
+
+$packageWithConfiguredFileButNoBinary = [pscustomobject]@{
+    versions = @(
+        [pscustomobject]@{
+            id = 'version-1'
+            version = '2702.1.58'
+            file_name = [pscustomobject]@{ Windows_64 = [pscustomobject]@{ name = 'FusionManagedUpdater.cmd'; type = 'cloud' } }
+        }
+    )
+}
+$configuredFileRecord = Get-Action1PackageVersionRecord -Package $packageWithConfiguredFileButNoBinary -BuildVersion '2702.1.58'
+Assert-True (-not (Test-Action1PackageVersionHasWindowsBinary -VersionRecord $configuredFileRecord)) 'Version binary helper does not treat configured file name as uploaded binary'
+Assert-Equal (Resolve-Action1VersionSyncAction -Package $packageWithConfiguredFileButNoBinary -BuildVersion '2702.1.58') 'UploadMissingBinary' 'Version sync repairs configured file without binary id'
 
 $previousErrorActionPreference = $ErrorActionPreference
 $ErrorActionPreference = 'Stop'
