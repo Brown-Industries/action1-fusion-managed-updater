@@ -69,7 +69,7 @@ $env:ACTION1_ORG_ID='<Action1 organization id or all>'
 
 `FUSION_OBSERVED_BUILD_VERSION` is optional in live mode. If set, it must match the highest Action1 inventory version. Use `-AllowManualObservedBuild` only when you verified the build outside Action1 and need to create the history version before inventory catches up.
 
-Before posting a new version, the watcher also loads the Action1 package with `fields=versions` and exits without creating a duplicate if the target build version already exists.
+Before posting a new version, the watcher also loads the Action1 package with `fields=versions`. If the resolved inventory build is already recorded, the watcher fails without updating state so a stale Action1 inventory snapshot cannot hide a new Autodesk release signal.
 
 Do not run live watcher mode until the manual gates in `action1/validation-notes.md` are complete. The script enforces Action1 inventory build resolution, manual-version mismatch checks, duplicate version checks, package ID, and token checks; it does not enforce the Action1 match-conflict gate by itself.
 

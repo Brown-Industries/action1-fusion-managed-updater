@@ -262,6 +262,19 @@ function Test-Action1PackageHasVersion {
     return $versions -contains $BuildVersion
 }
 
+function Assert-FusionWatcherNewBuildNotAlreadyRecorded {
+    param(
+        [Parameter(Mandatory = $true)]$Package,
+        [Parameter(Mandatory = $true)][string]$BuildVersion
+    )
+
+    if (Test-Action1PackageHasVersion -Package $Package -BuildVersion $BuildVersion) {
+        throw "Action1 package already has Fusion version $BuildVersion. The Autodesk release signal changed, but Action1 inventory resolved to an already recorded build. Refresh Action1 inventory and rerun; watcher state was not updated."
+    }
+
+    return $BuildVersion
+}
+
 function Write-FusionWatcherState {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -327,4 +340,4 @@ function Get-FusionBlockingProcesses {
     return $Processes | Where-Object { $names -contains $_.ProcessName }
 }
 
-Export-ModuleMember -Function ConvertTo-FusionVersionParts, Compare-FusionVersion, Read-FusionInfoFile, Get-HighestFusionInventoryVersion, New-HistoricalVersionWarning, New-Action1FusionVersionBody, Test-AutodeskHeadChanged, New-FusionWatcherDryRunResult, Assert-FusionWatcherLiveBuildVersion, Resolve-FusionWatcherBuildVersion, Test-Action1PackageVersionContainerPresent, Get-Action1PackageVersionValues, Test-Action1PackageHasVersion, Write-FusionWatcherState, Get-AutodeskInstallerHead, ConvertFrom-AutodeskInstallerHeadRecord, Get-LatestFusionStreamer, Get-FusionBlockingProcesses
+Export-ModuleMember -Function ConvertTo-FusionVersionParts, Compare-FusionVersion, Read-FusionInfoFile, Get-HighestFusionInventoryVersion, New-HistoricalVersionWarning, New-Action1FusionVersionBody, Test-AutodeskHeadChanged, New-FusionWatcherDryRunResult, Assert-FusionWatcherLiveBuildVersion, Resolve-FusionWatcherBuildVersion, Test-Action1PackageVersionContainerPresent, Get-Action1PackageVersionValues, Test-Action1PackageHasVersion, Assert-FusionWatcherNewBuildNotAlreadyRecorded, Write-FusionWatcherState, Get-AutodeskInstallerHead, ConvertFrom-AutodeskInstallerHeadRecord, Get-LatestFusionStreamer, Get-FusionBlockingProcesses

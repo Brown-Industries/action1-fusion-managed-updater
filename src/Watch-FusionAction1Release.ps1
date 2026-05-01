@@ -127,11 +127,7 @@ if (-not (Test-Action1PackageVersionContainerPresent -Package $package)) {
     throw 'Action1 package response did not include a versions container. Cannot verify duplicate package versions before live creation.'
 }
 
-if (Test-Action1PackageHasVersion -Package $package -BuildVersion $buildVersion) {
-    Write-State -Path $StatePath -State $head
-    Write-Host "Action1 Fusion history version for $buildVersion already exists; updated watcher state without creating a duplicate."
-    exit 0
-}
+[void](Assert-FusionWatcherNewBuildNotAlreadyRecorded -Package $package -BuildVersion $buildVersion)
 
 Invoke-Action1Api -Method POST -Path "/software-repository/$OrgId/$PackageId/versions" -Body $body | Out-Null
 Write-State -Path $StatePath -State $head

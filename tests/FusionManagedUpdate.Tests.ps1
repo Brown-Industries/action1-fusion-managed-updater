@@ -174,6 +174,8 @@ $packageVersions = @(Get-Action1PackageVersionValues -Package $packageWithVersio
 Assert-Equal ($packageVersions -join ',') '2702.1.47,2702.1.58' 'Action1 package version helper reads version container'
 Assert-True (Test-Action1PackageHasVersion -Package $packageWithVersions -BuildVersion '2702.1.58') 'Action1 package version helper detects existing build version'
 Assert-True (-not (Test-Action1PackageHasVersion -Package $packageWithVersions -BuildVersion '2702.1.99')) 'Action1 package version helper reports missing build version'
+Assert-ThrowsLike { Assert-FusionWatcherNewBuildNotAlreadyRecorded -Package $packageWithVersions -BuildVersion '2702.1.58' } '*already has Fusion version 2702.1.58*' 'Fusion watcher duplicate guard rejects changed release signal with existing inventory build'
+Assert-Equal (Assert-FusionWatcherNewBuildNotAlreadyRecorded -Package $packageWithVersions -BuildVersion '2702.1.99') '2702.1.99' 'Fusion watcher duplicate guard allows new inventory build'
 
 $watcherLiveTempRoot = Join-Path $env:TEMP ('fmu-watcher-live-test-' + [guid]::NewGuid().ToString('N'))
 $watcherStatePath = Join-Path $watcherLiveTempRoot 'state.json'
@@ -210,6 +212,16 @@ try {
         $createdVersion = Get-Content -LiteralPath $createdVersionPath -Raw | ConvertFrom-Json
         Assert-Equal $createdVersion.version '2702.1.58' 'Fusion watcher live script posts inventory build in Action1 version body'
     }
+
+    Set-Content -LiteralPath (Join-Path $watcherLiveTempRoot 'action1-package.json') -Encoding ASCII -Value '{"versions":{"items":[{"version":"2702.1.58"}]}}'
+    Remove-Item -LiteralPath $watcherStatePath -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath (Join-Path $watcherLiveTempRoot 'api-requests.log') -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $createdVersionPath -ErrorAction SilentlyContinue
+
+    $duplicateWatcherResult = Invoke-WatcherScript -Arguments @('-AutodeskInstallerUrl', 'https://offline-fixture.invalid/FusionAdminInstall.exe', '-StatePath', $watcherStatePath, '-OfflineFixtureRoot', $watcherLiveTempRoot)
+    Assert-True ($duplicateWatcherResult.ExitCode -ne 0) 'Fusion watcher live script fails duplicate inventory build when release signal changed'
+    Assert-True ($duplicateWatcherResult.Output -like '*already has Fusion version 2702.1.58*') 'Fusion watcher live script reports stale inventory duplicate risk'
+    Assert-True (-not (Test-Path -LiteralPath $watcherStatePath)) 'Fusion watcher live script preserves state when duplicate build blocks changed release signal'
 }
 finally {
     if ($null -eq $previousAction1BaseUrl) { Remove-Item Env:\ACTION1_BASE_URL -ErrorAction SilentlyContinue } else { $env:ACTION1_BASE_URL = $previousAction1BaseUrl }
