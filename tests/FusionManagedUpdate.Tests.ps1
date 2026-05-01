@@ -700,6 +700,16 @@ try {
     Assert-True ($createRequests -contains 'UPLOAD /software-repository/all/pkg-1/versions/2702.1.58_offline/upload') 'Stateless sync create flow uploads created version payload'
 
     Set-Content -LiteralPath (Join-Path $syncTempRoot 'package.json') -Encoding ASCII -Value '{"id":"pkg-1","versions":[{"id":"version-1","version":"2702.1.58"}]}'
+    Set-Content -LiteralPath (Join-Path $syncTempRoot 'version-detail.json') -Encoding ASCII -Value '{"id":"version-1","version":"2702.1.58","binary_id":{"Windows_64":"binary-1"}}'
+    Remove-Item -LiteralPath (Join-Path $syncTempRoot 'api-requests.log') -ErrorAction SilentlyContinue
+    $detailNoOpResult = Invoke-SyncScript -Arguments @('-OfflineFixtureRoot', $syncTempRoot)
+    Assert-Equal $detailNoOpResult.ExitCode 0 'Stateless sync exits 0 when version detail confirms uploaded payload'
+    Assert-True ($detailNoOpResult.Output -like '*already recorded*') 'Stateless sync reports already-recorded version from version detail'
+    $detailNoOpRequests = @(Get-Content -LiteralPath (Join-Path $syncTempRoot 'api-requests.log'))
+    Assert-True (-not ($detailNoOpRequests -contains 'UPLOAD /software-repository/all/pkg-1/versions/version-1/upload')) 'Stateless sync does not upload when version detail has binary'
+    Remove-Item -LiteralPath (Join-Path $syncTempRoot 'version-detail.json') -ErrorAction SilentlyContinue
+
+    Set-Content -LiteralPath (Join-Path $syncTempRoot 'package.json') -Encoding ASCII -Value '{"id":"pkg-1","versions":[{"id":"version-1","version":"2702.1.58"}]}'
     Remove-Item -LiteralPath (Join-Path $syncTempRoot 'api-requests.log') -ErrorAction SilentlyContinue
     $repairResult = Invoke-SyncScript -Arguments @('-OfflineFixtureRoot', $syncTempRoot)
     Assert-Equal $repairResult.ExitCode 0 'Stateless sync exits 0 after uploading missing binary'
