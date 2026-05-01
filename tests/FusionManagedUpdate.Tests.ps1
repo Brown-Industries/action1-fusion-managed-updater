@@ -873,14 +873,25 @@ Assert-True ($blockingProcesses.ProcessName -notcontains 'Autodesk Fusion 360') 
 $endpointScriptText = Get-Content -LiteralPath $endpointScript -Raw
 Assert-True (-not $endpointScriptText.Contains('$LASTEXITCODE')) 'Endpoint updater captures native process exit codes without relying on LASTEXITCODE'
 
-$tempRoot = Join-Path $env:TEMP ('fmu-bootstrap-test-' + [guid]::NewGuid().ToString('N'))
+$tempRoot = Join-Path $env:TEMP ('fmu-remote-bootstrap-download-test-' + [guid]::NewGuid().ToString('N'))
 $webDeployRoot = Join-Path $tempRoot 'Autodesk\webdeploy'
 $fakeInstaller = Join-Path $tempRoot 'fake-admin-install.ps1'
-$fakeStreamer = Join-Path $tempRoot 'fake-streamer-bootstrap.ps1'
-$markerPath = Join-Path $tempRoot 'bootstrap-operations.txt'
-$logPath = Join-Path $tempRoot 'FusionManagedUpdater.log'
+$fakeDownloader = Join-Path $tempRoot 'fake-curl.ps1'
+$fakeStreamer = Join-Path $tempRoot 'fake-streamer-remote-bootstrap.ps1'
+$fusionExe = Join-Path $tempRoot 'Fusion360.exe'
+$markerPath = Join-Path $tempRoot 'remote-bootstrap-operations.txt'
 New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
-New-Item -ItemType File -Path $markerPath -Force | Out-Null
+New-Item -ItemType File -Path $markerPath, $fusionExe -Force | Out-Null
+Set-Content -LiteralPath $fakeDownloader -Encoding ASCII -Value @(
+    '$out = $null',
+    'for ($i = 0; $i -lt $args.Count; $i++) {',
+    '    if (($args[$i] -eq ''--output'' -or $args[$i] -eq ''-o'') -and ($i + 1) -lt $args.Count) { $out = $args[$i + 1] }',
+    '}',
+    'Add-Content -LiteralPath $env:FMU_TEST_MARKER -Value ("downloader_args=" + ($args -join ","))',
+    'if (-not $out) { exit 17 }',
+    'Copy-Item -LiteralPath $env:FMU_TEST_REMOTE_INSTALLER_SOURCE -Destination $out -Force',
+    'exit 0'
+)
 Set-Content -LiteralPath $fakeInstaller -Encoding ASCII -Value @(
     'Add-Content -LiteralPath $env:FMU_TEST_MARKER -Value ("installer_args=" + ($args -join ","))',
     '$streamerDir = Join-Path $env:FMU_TEST_WEBDEPLOY_ROOT ''meta\streamer\20260501000000''',
@@ -896,7 +907,9 @@ Set-Content -LiteralPath $fakeStreamer -Encoding ASCII -Value @(
     '}',
     'Add-Content -LiteralPath $env:FMU_TEST_MARKER -Value $mode',
     'if ($mode -eq ''query'') {',
-    '    Set-Content -LiteralPath $info -Encoding ASCII -Value ''{"manifest":{"build-version":"2702.1.58","major-update-version":"","release-version":"test","streamer":{"feature-version":"test","release-id":"test"},"properties":{"display-name":"Autodesk Fusion"}},"install_path":"C:\\Fake","connection":"offline","stream":"test"}''',
+    '    $manifest = @{ ''build-version'' = ''2702.1.58''; ''major-update-version'' = ''''; ''release-version'' = ''test''; streamer = @{ ''feature-version'' = ''test''; ''release-id'' = ''test'' }; properties = @{ ''display-name'' = ''Autodesk Fusion'' } }',
+    '    $payload = [pscustomobject]@{ manifest = $manifest; install_path = $env:FMU_TEST_INSTALL_PATH; connection = ''offline''; stream = ''test'' } | ConvertTo-Json -Depth 8 -Compress',
+    '    Set-Content -LiteralPath $info -Encoding ASCII -Value $payload',
     '    exit 0',
     '}',
     'exit 9'
@@ -904,8 +917,106 @@ Set-Content -LiteralPath $fakeStreamer -Encoding ASCII -Value @(
 
 $previousMarker = $env:FMU_TEST_MARKER
 $previousWebDeployRoot = $env:FMU_TEST_WEBDEPLOY_ROOT
+$previousRemoteInstallerSource = $env:FMU_TEST_REMOTE_INSTALLER_SOURCE
+$previousCurlPath = $env:FMU_CURL_PATH
+$previousInstallPath = $env:FMU_TEST_INSTALL_PATH
 $env:FMU_TEST_MARKER = $markerPath
 $env:FMU_TEST_WEBDEPLOY_ROOT = $webDeployRoot
+$env:FMU_TEST_REMOTE_INSTALLER_SOURCE = $fakeInstaller
+$env:FMU_CURL_PATH = $fakeDownloader
+$env:FMU_TEST_INSTALL_PATH = $fusionExe
+try {
+    $remoteBootstrapResult = Invoke-EndpointScript -Arguments @('-WebDeployRoot', $webDeployRoot, '-AdminInstallerUrl', 'https://fixture.invalid/FusionAdminInstall.ps1', '-InstallerWorkRoot', $tempRoot, '-StreamerPathOverride', $fakeStreamer)
+    Assert-Equal $remoteBootstrapResult.ExitCode 0 'Endpoint updater bootstraps remote admin installer through curl downloader'
+    Assert-True ($remoteBootstrapResult.Output -like '*FMU_STEP bootstrap_download_method method=curl*') 'Endpoint updater reports curl bootstrap download method'
+
+    $remoteBootstrapOperations = @(Get-Content -LiteralPath $markerPath | Where-Object { $_ })
+    Assert-True (@($remoteBootstrapOperations -like 'downloader_args=*--fail*').Count -gt 0) 'Curl downloader receives fail-fast arguments'
+    Assert-True (@($remoteBootstrapOperations -like 'downloader_args=*--location*').Count -gt 0) 'Curl downloader follows Autodesk redirects'
+    Assert-True ($remoteBootstrapOperations -contains 'installer_args=--globalinstall,--quiet') 'Remote bootstrap installer is run after download'
+    Assert-True ($remoteBootstrapOperations -contains 'query') 'Endpoint updater verifies remote bootstrap with streamer query'
+}
+finally {
+    $env:FMU_TEST_MARKER = $previousMarker
+    $env:FMU_TEST_WEBDEPLOY_ROOT = $previousWebDeployRoot
+    $env:FMU_TEST_REMOTE_INSTALLER_SOURCE = $previousRemoteInstallerSource
+    $env:FMU_CURL_PATH = $previousCurlPath
+    $env:FMU_TEST_INSTALL_PATH = $previousInstallPath
+    Remove-Item -LiteralPath $tempRoot -Recurse -Force
+}
+
+$tempRoot = Join-Path $env:TEMP ('fmu-missing-install-path-test-' + [guid]::NewGuid().ToString('N'))
+$webDeployRoot = Join-Path $tempRoot 'Autodesk\webdeploy'
+$fakeStreamer = Join-Path $tempRoot 'fake-streamer-missing-install-path.ps1'
+$missingInstallPath = Join-Path $tempRoot 'missing-Fusion360.exe'
+New-Item -ItemType Directory -Path (Join-Path $webDeployRoot 'meta\streamer') -Force | Out-Null
+Set-Content -LiteralPath $fakeStreamer -Encoding ASCII -Value @(
+    '$mode = $null',
+    '$info = $null',
+    'for ($i = 0; $i -lt $args.Count; $i++) {',
+    '    if ($args[$i] -eq ''--process'' -and ($i + 1) -lt $args.Count) { $mode = $args[$i + 1] }',
+    '    if ($args[$i] -eq ''--infofile'' -and ($i + 1) -lt $args.Count) { $info = $args[$i + 1] }',
+    '}',
+    'if ($mode -eq ''query'') {',
+    '    $manifest = @{ ''build-version'' = ''2702.1.58''; ''major-update-version'' = ''''; ''release-version'' = ''test''; streamer = @{ ''feature-version'' = ''test''; ''release-id'' = ''test'' }; properties = @{ ''display-name'' = ''Autodesk Fusion'' } }',
+    '    $payload = [pscustomobject]@{ manifest = $manifest; install_path = $env:FMU_TEST_INSTALL_PATH; connection = ''offline''; stream = ''test'' } | ConvertTo-Json -Depth 8 -Compress',
+    '    Set-Content -LiteralPath $info -Encoding ASCII -Value $payload',
+    '    exit 0',
+    '}',
+    'if ($mode -eq ''update'') { exit 0 }',
+    'exit 9'
+)
+
+$previousInstallPath = $env:FMU_TEST_INSTALL_PATH
+$env:FMU_TEST_INSTALL_PATH = $missingInstallPath
+try {
+    $missingPathResult = Invoke-EndpointScript -Arguments @('-WebDeployRoot', $webDeployRoot, '-StreamerPathOverride', $fakeStreamer)
+    Assert-True ($missingPathResult.ExitCode -ne 0) 'Endpoint updater fails when streamer query install path does not exist'
+    Assert-True ($missingPathResult.Output -like '*returned install path that does not exist*') 'Endpoint updater reports missing Fusion install path'
+}
+finally {
+    $env:FMU_TEST_INSTALL_PATH = $previousInstallPath
+    Remove-Item -LiteralPath $tempRoot -Recurse -Force
+}
+
+$tempRoot = Join-Path $env:TEMP ('fmu-bootstrap-test-' + [guid]::NewGuid().ToString('N'))
+$webDeployRoot = Join-Path $tempRoot 'Autodesk\webdeploy'
+$fakeInstaller = Join-Path $tempRoot 'fake-admin-install.ps1'
+$fakeStreamer = Join-Path $tempRoot 'fake-streamer-bootstrap.ps1'
+$fusionExe = Join-Path $tempRoot 'Fusion360.exe'
+$markerPath = Join-Path $tempRoot 'bootstrap-operations.txt'
+$logPath = Join-Path $tempRoot 'FusionManagedUpdater.log'
+New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+New-Item -ItemType File -Path $markerPath, $fusionExe -Force | Out-Null
+Set-Content -LiteralPath $fakeInstaller -Encoding ASCII -Value @(
+    'Add-Content -LiteralPath $env:FMU_TEST_MARKER -Value ("installer_args=" + ($args -join ","))',
+    '$streamerDir = Join-Path $env:FMU_TEST_WEBDEPLOY_ROOT ''meta\streamer\20260501000000''',
+    'New-Item -ItemType Directory -Path $streamerDir -Force | Out-Null',
+    'exit 0'
+)
+Set-Content -LiteralPath $fakeStreamer -Encoding ASCII -Value @(
+    '$mode = $null',
+    '$info = $null',
+    'for ($i = 0; $i -lt $args.Count; $i++) {',
+    '    if ($args[$i] -eq ''--process'' -and ($i + 1) -lt $args.Count) { $mode = $args[$i + 1] }',
+    '    if ($args[$i] -eq ''--infofile'' -and ($i + 1) -lt $args.Count) { $info = $args[$i + 1] }',
+    '}',
+    'Add-Content -LiteralPath $env:FMU_TEST_MARKER -Value $mode',
+    'if ($mode -eq ''query'') {',
+    '    $manifest = @{ ''build-version'' = ''2702.1.58''; ''major-update-version'' = ''''; ''release-version'' = ''test''; streamer = @{ ''feature-version'' = ''test''; ''release-id'' = ''test'' }; properties = @{ ''display-name'' = ''Autodesk Fusion'' } }',
+    '    $payload = [pscustomobject]@{ manifest = $manifest; install_path = $env:FMU_TEST_INSTALL_PATH; connection = ''offline''; stream = ''test'' } | ConvertTo-Json -Depth 8 -Compress',
+    '    Set-Content -LiteralPath $info -Encoding ASCII -Value $payload',
+    '    exit 0',
+    '}',
+    'exit 9'
+)
+
+$previousMarker = $env:FMU_TEST_MARKER
+$previousWebDeployRoot = $env:FMU_TEST_WEBDEPLOY_ROOT
+$previousInstallPath = $env:FMU_TEST_INSTALL_PATH
+$env:FMU_TEST_MARKER = $markerPath
+$env:FMU_TEST_WEBDEPLOY_ROOT = $webDeployRoot
+$env:FMU_TEST_INSTALL_PATH = $fusionExe
 try {
     $bootstrapResult = Invoke-EndpointScript -Arguments @('-WebDeployRoot', $webDeployRoot, '-AdminInstallerUrl', $fakeInstaller, '-InstallerWorkRoot', $tempRoot, '-StreamerPathOverride', $fakeStreamer, '-LogPath', $logPath)
     Assert-Equal $bootstrapResult.ExitCode 0 'Endpoint updater exits 0 after bootstrapping missing all-users Fusion'
@@ -927,6 +1038,7 @@ try {
 finally {
     $env:FMU_TEST_MARKER = $previousMarker
     $env:FMU_TEST_WEBDEPLOY_ROOT = $previousWebDeployRoot
+    $env:FMU_TEST_INSTALL_PATH = $previousInstallPath
     Remove-Item -LiteralPath $tempRoot -Recurse -Force
 }
 
@@ -934,10 +1046,11 @@ $tempRoot = Join-Path $env:TEMP ('fmu-partial-bootstrap-test-' + [guid]::NewGuid
 $webDeployRoot = Join-Path $tempRoot 'Autodesk\webdeploy'
 $fakeInstaller = Join-Path $tempRoot 'fake-admin-install.ps1'
 $fakeStreamer = Join-Path $tempRoot 'fake-streamer-partial-bootstrap.ps1'
+$fusionExe = Join-Path $tempRoot 'Fusion360.exe'
 $markerPath = Join-Path $tempRoot 'partial-bootstrap-operations.txt'
 $logPath = Join-Path $tempRoot 'FusionManagedUpdater.log'
 New-Item -ItemType Directory -Path $webDeployRoot -Force | Out-Null
-New-Item -ItemType File -Path $markerPath -Force | Out-Null
+New-Item -ItemType File -Path $markerPath, $fusionExe -Force | Out-Null
 Set-Content -LiteralPath $fakeInstaller -Encoding ASCII -Value @(
     'Add-Content -LiteralPath $env:FMU_TEST_MARKER -Value ("installer_args=" + ($args -join ","))',
     '$streamerDir = Join-Path $env:FMU_TEST_WEBDEPLOY_ROOT ''meta\streamer\20260501000000''',
@@ -953,7 +1066,9 @@ Set-Content -LiteralPath $fakeStreamer -Encoding ASCII -Value @(
     '}',
     'Add-Content -LiteralPath $env:FMU_TEST_MARKER -Value $mode',
     'if ($mode -eq ''query'') {',
-    '    Set-Content -LiteralPath $info -Encoding ASCII -Value ''{"manifest":{"build-version":"2702.1.58","major-update-version":"","release-version":"test","streamer":{"feature-version":"test","release-id":"test"},"properties":{"display-name":"Autodesk Fusion"}},"install_path":"C:\\Fake","connection":"offline","stream":"test"}''',
+    '    $manifest = @{ ''build-version'' = ''2702.1.58''; ''major-update-version'' = ''''; ''release-version'' = ''test''; streamer = @{ ''feature-version'' = ''test''; ''release-id'' = ''test'' }; properties = @{ ''display-name'' = ''Autodesk Fusion'' } }',
+    '    $payload = [pscustomobject]@{ manifest = $manifest; install_path = $env:FMU_TEST_INSTALL_PATH; connection = ''offline''; stream = ''test'' } | ConvertTo-Json -Depth 8 -Compress',
+    '    Set-Content -LiteralPath $info -Encoding ASCII -Value $payload',
     '    exit 0',
     '}',
     'if ($mode -eq ''update'') { exit 0 }',
@@ -962,8 +1077,10 @@ Set-Content -LiteralPath $fakeStreamer -Encoding ASCII -Value @(
 
 $previousMarker = $env:FMU_TEST_MARKER
 $previousWebDeployRoot = $env:FMU_TEST_WEBDEPLOY_ROOT
+$previousInstallPath = $env:FMU_TEST_INSTALL_PATH
 $env:FMU_TEST_MARKER = $markerPath
 $env:FMU_TEST_WEBDEPLOY_ROOT = $webDeployRoot
+$env:FMU_TEST_INSTALL_PATH = $fusionExe
 try {
     $partialBootstrapResult = Invoke-EndpointScript -Arguments @('-WebDeployRoot', $webDeployRoot, '-AdminInstallerUrl', $fakeInstaller, '-InstallerWorkRoot', $tempRoot, '-StreamerPathOverride', $fakeStreamer, '-LogPath', $logPath)
     Assert-Equal $partialBootstrapResult.ExitCode 0 'Endpoint updater exits 0 after bootstrapping partial all-users Fusion root'
@@ -975,15 +1092,17 @@ try {
 finally {
     $env:FMU_TEST_MARKER = $previousMarker
     $env:FMU_TEST_WEBDEPLOY_ROOT = $previousWebDeployRoot
+    $env:FMU_TEST_INSTALL_PATH = $previousInstallPath
     Remove-Item -LiteralPath $tempRoot -Recurse -Force
 }
 
 $tempRoot = Join-Path $env:TEMP ('fmu-test-' + [guid]::NewGuid().ToString('N'))
 $webDeployRoot = Join-Path $tempRoot 'Autodesk\webdeploy'
 $fakeStreamer = Join-Path $tempRoot 'fake-streamer.ps1'
+$fusionExe = Join-Path $tempRoot 'Fusion360.exe'
 $markerPath = Join-Path $tempRoot 'infofiles.txt'
 New-Item -ItemType Directory -Path (Join-Path $webDeployRoot 'meta\streamer') -Force | Out-Null
-New-Item -ItemType File -Path $markerPath -Force | Out-Null
+New-Item -ItemType File -Path $markerPath, $fusionExe -Force | Out-Null
 Set-Content -LiteralPath $fakeStreamer -Encoding ASCII -Value @(
     '$mode = $null',
     '$info = $null',
@@ -993,7 +1112,9 @@ Set-Content -LiteralPath $fakeStreamer -Encoding ASCII -Value @(
     '}',
     'if ($mode -eq ''query'') {',
     '    Add-Content -LiteralPath $env:FMU_TEST_MARKER -Value $info',
-    '    Set-Content -LiteralPath $info -Encoding ASCII -Value ''{"manifest":{"build-version":"","major-update-version":"","release-version":"test","streamer":{"feature-version":"test","release-id":"test"},"properties":{"display-name":"Autodesk Fusion"}},"install_path":"C:\\Fake","connection":"offline","stream":"test"}''',
+    '    $manifest = @{ ''build-version'' = ''''; ''major-update-version'' = ''''; ''release-version'' = ''test''; streamer = @{ ''feature-version'' = ''test''; ''release-id'' = ''test'' }; properties = @{ ''display-name'' = ''Autodesk Fusion'' } }',
+    '    $payload = [pscustomobject]@{ manifest = $manifest; install_path = $env:FMU_TEST_INSTALL_PATH; connection = ''offline''; stream = ''test'' } | ConvertTo-Json -Depth 8 -Compress',
+    '    Set-Content -LiteralPath $info -Encoding ASCII -Value $payload',
     '    exit 0',
     '}',
     'if ($mode -eq ''update'') { exit 0 }',
@@ -1001,7 +1122,9 @@ Set-Content -LiteralPath $fakeStreamer -Encoding ASCII -Value @(
 )
 
 $previousMarker = $env:FMU_TEST_MARKER
+$previousInstallPath = $env:FMU_TEST_INSTALL_PATH
 $env:FMU_TEST_MARKER = $markerPath
+$env:FMU_TEST_INSTALL_PATH = $fusionExe
 try {
     $emptyBuildResult = Invoke-EndpointScript -Arguments @('-WebDeployRoot', $webDeployRoot, '-StreamerPathOverride', $fakeStreamer)
     Assert-True ($emptyBuildResult.ExitCode -ne 0) 'Endpoint updater fails when post-update build version is empty'
@@ -1015,15 +1138,17 @@ try {
 }
 finally {
     $env:FMU_TEST_MARKER = $previousMarker
+    $env:FMU_TEST_INSTALL_PATH = $previousInstallPath
     Remove-Item -LiteralPath $tempRoot -Recurse -Force
 }
 
 $tempRoot = Join-Path $env:TEMP ('fmu-test-' + [guid]::NewGuid().ToString('N'))
 $webDeployRoot = Join-Path $tempRoot 'Autodesk\webdeploy'
 $fakeStreamer = Join-Path $tempRoot 'fake-streamer-success.ps1'
+$fusionExe = Join-Path $tempRoot 'Fusion360.exe'
 $markerPath = Join-Path $tempRoot 'operations.txt'
 New-Item -ItemType Directory -Path (Join-Path $webDeployRoot 'meta\streamer') -Force | Out-Null
-New-Item -ItemType File -Path $markerPath -Force | Out-Null
+New-Item -ItemType File -Path $markerPath, $fusionExe -Force | Out-Null
 Set-Content -LiteralPath $fakeStreamer -Encoding ASCII -Value @(
     '$mode = $null',
     '$info = $null',
@@ -1034,7 +1159,9 @@ Set-Content -LiteralPath $fakeStreamer -Encoding ASCII -Value @(
     'Add-Content -LiteralPath $env:FMU_TEST_MARKER -Value $mode',
     'if ($mode -eq ''query'') {',
     '    Add-Content -LiteralPath $env:FMU_TEST_MARKER -Value "info=$info"',
-    '    Set-Content -LiteralPath $info -Encoding ASCII -Value ''{"manifest":{"build-version":"2702.1.58","major-update-version":"","release-version":"test","streamer":{"feature-version":"test","release-id":"test"},"properties":{"display-name":"Autodesk Fusion"}},"install_path":"C:\\Fake","connection":"offline","stream":"test"}''',
+    '    $manifest = @{ ''build-version'' = ''2702.1.58''; ''major-update-version'' = ''''; ''release-version'' = ''test''; streamer = @{ ''feature-version'' = ''test''; ''release-id'' = ''test'' }; properties = @{ ''display-name'' = ''Autodesk Fusion'' } }',
+    '    $payload = [pscustomobject]@{ manifest = $manifest; install_path = $env:FMU_TEST_INSTALL_PATH; connection = ''offline''; stream = ''test'' } | ConvertTo-Json -Depth 8 -Compress',
+    '    Set-Content -LiteralPath $info -Encoding ASCII -Value $payload',
     '    exit 0',
     '}',
     'if ($mode -eq ''update'') { exit 0 }',
@@ -1042,7 +1169,9 @@ Set-Content -LiteralPath $fakeStreamer -Encoding ASCII -Value @(
 )
 
 $previousMarker = $env:FMU_TEST_MARKER
+$previousInstallPath = $env:FMU_TEST_INSTALL_PATH
 $env:FMU_TEST_MARKER = $markerPath
+$env:FMU_TEST_INSTALL_PATH = $fusionExe
 try {
     $successResult = Invoke-EndpointScript -Arguments @('-WebDeployRoot', $webDeployRoot, '-StreamerPathOverride', $fakeStreamer)
     Assert-Equal $successResult.ExitCode 0 'Endpoint updater exits 0 when post-update build version exists'
@@ -1058,5 +1187,6 @@ try {
 }
 finally {
     $env:FMU_TEST_MARKER = $previousMarker
+    $env:FMU_TEST_INSTALL_PATH = $previousInstallPath
     Remove-Item -LiteralPath $tempRoot -Recurse -Force
 }

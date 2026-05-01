@@ -99,7 +99,68 @@ function New-FusionAdminInstallerTargetPath {
             $extension = $sourceExtension
         }
     }
+    else {
+        try {
+            $sourceUri = [Uri]$Source
+            if ($sourceUri.IsAbsoluteUri) {
+                $sourceExtension = [IO.Path]::GetExtension([Uri]::UnescapeDataString($sourceUri.AbsolutePath))
+                if (-not [string]::IsNullOrWhiteSpace($sourceExtension)) {
+                    $extension = $sourceExtension
+                }
+            }
+        }
+        catch {
+        }
+    }
     return Join-Path $WorkRoot ('FusionAdminInstall-' + [guid]::NewGuid().ToString('N') + $extension)
+}
+
+function Get-FusionCurlDownloaderPath {
+    if (-not [string]::IsNullOrWhiteSpace($env:FMU_CURL_PATH)) {
+        return $env:FMU_CURL_PATH
+    }
+
+    $curl = Get-Command curl.exe -CommandType Application -ErrorAction SilentlyContinue
+    if ($curl) {
+        return $curl.Source
+    }
+
+    return ''
+}
+
+function Save-FusionAdminInstallerFromRemote {
+    param(
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][string]$Target
+    )
+
+    $curl = Get-FusionCurlDownloaderPath
+    if (-not [string]::IsNullOrWhiteSpace($curl)) {
+        Write-Step -Name 'bootstrap_download_method' -Message "method=curl command=$curl"
+        $curlExitCode = Invoke-FusionChildProcess -FilePath $curl -ArgumentList @(
+            '--fail',
+            '--location',
+            '--retry', '3',
+            '--retry-delay', '5',
+            '--connect-timeout', '60',
+            '--max-time', '3600',
+            '--output', $Target,
+            $Source
+        )
+        if ($curlExitCode -ne 0) {
+            throw "Fusion admin installer curl download failed with exit code $curlExitCode."
+        }
+        return
+    }
+
+    if (Get-Command Start-BitsTransfer -ErrorAction SilentlyContinue) {
+        Write-Step -Name 'bootstrap_download_method' -Message 'method=bits'
+        Start-BitsTransfer -Source $Source -Destination $Target -ErrorAction Stop
+        return
+    }
+
+    Write-Step -Name 'bootstrap_download_method' -Message 'method=invoke_webrequest'
+    Invoke-WebRequest -Uri $Source -OutFile $Target -UseBasicParsing -MaximumRedirection 5 -TimeoutSec 3600
 }
 
 function Save-FusionAdminInstaller {
@@ -115,12 +176,29 @@ function Save-FusionAdminInstaller {
     $target = New-FusionAdminInstallerTargetPath -Source $Source -WorkRoot $WorkRoot
     Write-Step -Name 'bootstrap_download_start' -Message "source=$Source target=$target"
     if (Test-Path -LiteralPath $Source) {
+        Write-Step -Name 'bootstrap_download_method' -Message 'method=copy'
         Copy-Item -LiteralPath $Source -Destination $target -Force
     }
     else {
-        Invoke-WebRequest -Uri $Source -OutFile $target -UseBasicParsing -MaximumRedirection 5 -TimeoutSec 3600
+        try {
+            Save-FusionAdminInstallerFromRemote -Source $Source -Target $target
+        }
+        catch {
+            Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue
+            throw
+        }
     }
-    Write-Step -Name 'bootstrap_download_success' -Message "path=$target"
+
+    if (-not (Test-Path -LiteralPath $target)) {
+        throw "Fusion admin installer download did not create target file: $target"
+    }
+
+    $downloadedInstaller = Get-Item -LiteralPath $target
+    if ($downloadedInstaller.Length -le 0) {
+        Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue
+        throw "Fusion admin installer download produced an empty file: $target"
+    }
+    Write-Step -Name 'bootstrap_download_success' -Message "path=$target bytes=$($downloadedInstaller.Length)"
     return $target
 }
 
@@ -276,6 +354,18 @@ function Invoke-FusionQuery {
         throw "Fusion query failed during $Phase with exit code $queryExitCode."
     }
     $info = Read-FusionInfoFile -Path $InfoPath
+    if ([string]::IsNullOrWhiteSpace($info.InstallPath)) {
+        throw "Fusion query during $Phase did not return an install path."
+    }
+
+    $normalizedInstallPath = [string]$info.InstallPath
+    if ($normalizedInstallPath.StartsWith('\\?\')) {
+        $normalizedInstallPath = $normalizedInstallPath.Substring(4)
+    }
+    if (-not (Test-Path -LiteralPath $normalizedInstallPath)) {
+        throw "Fusion query during $Phase returned install path that does not exist: $($info.InstallPath)"
+    }
+
     Write-Step -Name "${Phase}_query_success" -Message "build=$($info.BuildVersion) release=$($info.ReleaseVersion)"
     return $info
 }

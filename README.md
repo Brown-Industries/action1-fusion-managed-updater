@@ -37,7 +37,7 @@ If the all-users Fusion webdeploy root is missing, the payload downloads Autodes
 https://dl.appstreaming.autodesk.com/production/installers/Fusion%20Admin%20Install.exe
 ```
 
-The downloaded installer is saved under the endpoint temp directory, run with `--quiet`, and deleted in a `finally` block whether install succeeds or fails. After bootstrap, the payload verifies the installed Fusion build with the Autodesk streamer. If all-users Fusion already exists, the payload skips bootstrap and runs the existing streamer update flow.
+The downloaded installer is saved under the endpoint temp directory, run with `--quiet`, and deleted in a `finally` block whether install succeeds or fails. Remote downloads prefer `curl.exe` with redirect/retry/fail-fast options, then fall back to BITS and finally `Invoke-WebRequest` if needed. Set `FMU_CURL_PATH` only if an endpoint needs a specific curl executable. After bootstrap, the payload verifies the installed Fusion build and reported executable path with the Autodesk streamer. If all-users Fusion already exists, the payload skips bootstrap and runs the existing streamer update flow.
 
 The endpoint writes progress to stdout for Action1 history and to a durable log:
 
@@ -45,7 +45,7 @@ The endpoint writes progress to stdout for Action1 history and to a durable log:
 C:\ProgramData\BrownIndustries\Action1FusionManagedUpdater\FusionManagedUpdater.log
 ```
 
-Progress lines use the `FMU_STEP` prefix, including `bootstrap_download_start`, `bootstrap_install_start`, `update_start`, `verification_success`, and `failure`.
+Progress lines use the `FMU_STEP` prefix, including `bootstrap_download_start`, `bootstrap_download_method`, `bootstrap_install_start`, `update_start`, `verification_success`, and `failure`.
 
 ## Run Tests
 
