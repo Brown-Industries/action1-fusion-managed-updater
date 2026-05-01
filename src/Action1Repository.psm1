@@ -216,7 +216,7 @@ function Assert-Action1UploadLocationAllowed {
         throw "Action1 upload initialization returned an invalid upload location for package '$PackageId' version '$VersionId'."
     }
 
-    if (-not $uploadUri.IsAbsoluteUri -or $uploadUri.Scheme -ne $baseUri.Scheme -or $uploadUri.Host -ne $baseUri.Host) {
+    if (-not $uploadUri.IsAbsoluteUri -or $uploadUri.Scheme -ne $baseUri.Scheme -or $uploadUri.Host -ne $baseUri.Host -or $uploadUri.Port -ne $baseUri.Port) {
         throw "Action1 upload initialization returned an unexpected host or scheme for package '$PackageId' version '$VersionId'."
     }
 
@@ -240,7 +240,19 @@ function Send-Action1VersionPayload {
     }
 
     $initUri = "$($BaseUrl.TrimEnd('/'))/software-repository/$OrgId/$PackageId/versions/$VersionId/upload?platform=Windows_64"
-    $initResponse = Invoke-Action1UploadRequest -RequestCommand $RequestCommand -Method 'POST' -Uri $initUri -Headers (New-Action1UploadInitHeaders -AccessToken $AccessToken -PayloadLength $payloadBytes.Length) -ContentType 'application/json' -Body '{}' -SkipHttpErrorCheck
+    try {
+        $initResponse = Invoke-Action1UploadRequest -RequestCommand $RequestCommand -Method 'POST' -Uri $initUri -Headers (New-Action1UploadInitHeaders -AccessToken $AccessToken -PayloadLength $payloadBytes.Length) -ContentType 'application/json' -Body '{}' -SkipHttpErrorCheck
+    }
+    catch {
+        $statusCode = $null
+        if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
+            $statusCode = [int]$_.Exception.Response.StatusCode
+        }
+        if ($null -ne $statusCode) {
+            throw "Action1 upload init failed for package '$PackageId' version '$VersionId' with status code $statusCode."
+        }
+        throw "Action1 upload init failed for package '$PackageId' version '$VersionId'."
+    }
     if (-not (Test-Action1SuccessStatusCode -StatusCode $initResponse.StatusCode)) {
         throw "Action1 upload initialization failed for package '$PackageId' version '$VersionId' with status code $($initResponse.StatusCode)."
     }

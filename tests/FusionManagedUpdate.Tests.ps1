@@ -328,6 +328,13 @@ try {
     Assert-ThrowsLikeAndNotLike {
         Send-Action1VersionPayload -BaseUrl 'https://action1.invalid/api/3.0' -OrgId 'all' -PackageId 'pkg-1' -VersionId 'ver-1' -AccessToken 'secret-token' -PayloadPath $payloadPath -RequestCommand {
             param($Method, $Uri, $Headers, $ContentType, $Body)
+            throw 'simulated init transport failure https://action1.invalid/api/3.0/software-repository/all/pkg-1/versions/ver-1/upload?platform=Windows_64 Bearer secret-token'
+        }
+    } '*init*pkg-1*ver-1*' @('*Bearer*', '*secret-token*', '*https://action1.invalid/api/3.0*') 'Version payload upload sanitizes init transport failures'
+
+    Assert-ThrowsLikeAndNotLike {
+        Send-Action1VersionPayload -BaseUrl 'https://action1.invalid/api/3.0' -OrgId 'all' -PackageId 'pkg-1' -VersionId 'ver-1' -AccessToken 'secret-token' -PayloadPath $payloadPath -RequestCommand {
+            param($Method, $Uri, $Headers, $ContentType, $Body)
             return [pscustomobject]@{ StatusCode = 200; Headers = @{} }
         }
     } '*X-Upload-Location*pkg-1*ver-1*' @('*secret-token*', '*https://action1.invalid/api/3.0*') 'Version payload upload reports missing upload location with sanitized context'
@@ -344,6 +351,19 @@ try {
         }
     } '*unexpected host*pkg-1*ver-1*' @('*secret-token*', '*evil.invalid/upload/session-1*') 'Version payload upload rejects mismatched upload host with sanitized context'
     Assert-Equal ($mismatchCalls -join ',') 'POST' 'Version payload upload does not PUT to mismatched upload host'
+
+    $portMismatchCalls = @()
+    Assert-ThrowsLikeAndNotLike {
+        Send-Action1VersionPayload -BaseUrl 'https://action1.invalid:443/api/3.0' -OrgId 'all' -PackageId 'pkg-1' -VersionId 'ver-1' -AccessToken 'secret-token' -PayloadPath $payloadPath -RequestCommand {
+            param($Method, $Uri, $Headers, $ContentType, $Body)
+            $script:portMismatchCalls += $Method
+            if ($Method -eq 'POST') {
+                return [pscustomobject]@{ StatusCode = 200; Headers = @{ 'X-Upload-Location' = 'https://action1.invalid:444/api/3.0/upload/session-1' } }
+            }
+            throw 'PUT should not be called for mismatched upload port'
+        }
+    } '*unexpected host*pkg-1*ver-1*' @('*secret-token*', '*:444/api/3.0/upload/session-1*') 'Version payload upload rejects mismatched upload port with sanitized context'
+    Assert-Equal ($portMismatchCalls -join ',') 'POST' 'Version payload upload does not PUT to mismatched upload port'
 
     Assert-ThrowsLikeAndNotLike {
         Send-Action1VersionPayload -BaseUrl 'https://action1.invalid/api/3.0' -OrgId 'all' -PackageId 'pkg-1' -VersionId 'ver-1' -AccessToken 'secret-token' -PayloadPath $payloadPath -RequestCommand {
