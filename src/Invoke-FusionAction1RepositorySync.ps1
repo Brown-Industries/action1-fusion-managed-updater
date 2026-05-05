@@ -20,6 +20,24 @@ if (-not (Test-Path -LiteralPath $PayloadPath)) {
 }
 $payloadFileName = New-Action1PayloadFileName -PayloadPath $PayloadPath
 
+function Get-Timestamp {
+    return [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
+}
+
+function Write-Log {
+    param([Parameter(Mandatory = $true)][string]$Message)
+    # [Console]::Out.WriteLine + Flush is robust against PowerShell-in-Docker where
+    # Write-Host can silently drop output when no TTY is attached.
+    [Console]::Out.WriteLine("[$(Get-Timestamp)] $Message")
+    [Console]::Out.Flush()
+}
+
+function Write-Step {
+    param([Parameter(Mandatory = $true)][string]$Name, [string]$Detail = '')
+    $body = if ([string]::IsNullOrWhiteSpace($Detail)) { "FUSION_STEP $Name" } else { "FUSION_STEP $Name $Detail" }
+    Write-Log $body
+}
+
 function Read-OfflineJson {
     param([Parameter(Mandatory = $true)][string]$Name)
     $path = Join-Path $OfflineFixtureRoot $Name
@@ -38,6 +56,7 @@ function Write-OfflineRequest {
 }
 
 $config = Get-FusionContainerRuntimeConfig
+Write-Step 'sync_start' "package=$($config.PackageName) org=$($config.Action1OrgId)"
 
 if ($OfflineFixtureRoot) {
     $accessToken = (Read-OfflineJson -Name 'token.json').access_token
@@ -50,17 +69,20 @@ if ($OfflineFixtureRoot) {
     }
 }
 else {
+    Write-Step 'action1_token_acquire'
     $accessToken = Get-Action1AccessToken -BaseUrl $config.Action1BaseUrl -ClientId $config.Action1ClientId -ClientSecret $config.Action1ClientSecret
     $requestCommand = $null
 }
 
-$package = Ensure-Action1PackageByName -BaseUrl $config.Action1BaseUrl -OrgId $config.Action1OrgId -AccessToken $accessToken -PackageName $config.PackageName -RequestCommand $requestCommand
+$package = Resolve-Action1PackageByName -BaseUrl $config.Action1BaseUrl -OrgId $config.Action1OrgId -AccessToken $accessToken -PackageName $config.PackageName -RequestCommand $requestCommand
+Write-Step 'action1_package_resolved' "id=$($package.id) name=$($package.name)"
 
 if ($OfflineFixtureRoot) {
     $inventory = Read-OfflineJson -Name 'installed-software.json'
     $packageDetails = Read-OfflineJson -Name 'package.json'
 }
 else {
+    Write-Step 'inventory_query_start'
     $inventoryFilter = [uri]::EscapeDataString('Autodesk Fusion')
     $inventory = Invoke-Action1JsonApi -Method 'GET' -BaseUrl $config.Action1BaseUrl -AccessToken $accessToken -Path "/installed-software/$($config.Action1OrgId)/data?filter=$inventoryFilter&limit=1000"
     $packageDetails = Invoke-Action1JsonApi -Method 'GET' -BaseUrl $config.Action1BaseUrl -AccessToken $accessToken -Path "/software-repository/$($config.Action1OrgId)/$($package.id)?fields=versions"
@@ -75,10 +97,13 @@ catch {
     }
     throw
 }
+Write-Step 'inventory_build_resolved' "build=$buildVersion"
 $syncAction = Resolve-Action1VersionSyncAction -Package $packageDetails -BuildVersion $buildVersion -PayloadFileName $payloadFileName
+Write-Step 'sync_action_resolved' "action=$syncAction build=$buildVersion"
 
 if ($syncAction -eq 'NoOp') {
-    Write-Host "Action1 Fusion history version for $buildVersion is already recorded with an uploaded payload."
+    Write-Step 'noop' "build=$buildVersion already recorded with payload $payloadFileName"
+    Write-Log "Action1 Fusion history version for $buildVersion is already recorded with an uploaded payload."
     exit 0
 }
 
@@ -104,7 +129,8 @@ if ($syncAction -in @('UploadMissingBinary', 'UploadCurrentPayload')) {
     if ($null -ne $versionDetail -and
         (Test-Action1PackageVersionHasWindowsBinary -VersionRecord $versionDetail) -and
         (Test-Action1PackageVersionUsesPayloadFileName -VersionRecord $versionDetail -PayloadFileName $payloadFileName)) {
-        Write-Host "Action1 Fusion history version for $buildVersion is already recorded with an uploaded payload."
+        Write-Step 'noop' "build=$buildVersion already recorded with payload $payloadFileName"
+        Write-Log "Action1 Fusion history version for $buildVersion is already recorded with an uploaded payload."
         exit 0
     }
 }
@@ -127,6 +153,7 @@ if ($syncAction -eq 'CreateAndUpload') {
     if ([string]::IsNullOrWhiteSpace([string]$versionId)) {
         throw "Action1 create version response for Fusion build $buildVersion did not include an id."
     }
+    Write-Step 'action1_version_create' "id=$versionId build=$buildVersion"
 }
 else {
     if ([string]::IsNullOrWhiteSpace([string]$versionId)) {
@@ -138,8 +165,10 @@ else {
     else {
         [void](Set-Action1RepositoryVersionPayloadFileName -BaseUrl $config.Action1BaseUrl -OrgId $config.Action1OrgId -PackageId $package.id -VersionId $versionId -AccessToken $accessToken -PayloadFileName $payloadFileName)
     }
+    Write-Step 'action1_version_existing' "id=$versionId build=$buildVersion"
 }
 
+Write-Step 'payload_upload_start' "version_id=$versionId payload=$payloadFileName"
 if ($OfflineFixtureRoot) {
     Write-OfflineRequest -Line "UPLOAD /software-repository/$($config.Action1OrgId)/$($package.id)/versions/$versionId/upload"
 }
@@ -153,13 +182,14 @@ else {
         throw "Action1 version $versionId did not report expected Windows payload file name '$payloadFileName' after upload."
     }
 }
+Write-Step 'verification_success' "version_id=$versionId build=$buildVersion"
 
 if ($syncAction -eq 'UploadMissingBinary') {
-    Write-Host "Uploaded missing Action1 payload for Fusion history version $buildVersion."
+    Write-Log "Uploaded missing Action1 payload for Fusion history version $buildVersion."
 }
 elseif ($syncAction -eq 'UploadCurrentPayload') {
-    Write-Host "Uploaded current Action1 payload for Fusion history version $buildVersion."
+    Write-Log "Uploaded current Action1 payload for Fusion history version $buildVersion."
 }
 else {
-    Write-Host "Created Action1 Fusion history version for $buildVersion and uploaded payload."
+    Write-Log "Created Action1 Fusion history version for $buildVersion and uploaded payload."
 }

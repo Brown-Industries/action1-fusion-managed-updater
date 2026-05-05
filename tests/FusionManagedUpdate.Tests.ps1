@@ -363,7 +363,7 @@ Assert-ThrowsLike {
 } '*Multiple Action1 packages*' 'Package selector rejects duplicate exact names'
 
 $existingPackageCalls = @()
-$existingPackage = Ensure-Action1PackageByName -BaseUrl 'https://action1.invalid/api/3.0' -OrgId 'all' -AccessToken 'token' -PackageName 'Autodesk Fusion Managed Updater' -RequestCommand {
+$existingPackage = Resolve-Action1PackageByName -BaseUrl 'https://action1.invalid/api/3.0' -OrgId 'all' -AccessToken 'token' -PackageName 'Autodesk Fusion Managed Updater' -RequestCommand {
     param($Method, $Path, $Body)
     $script:existingPackageCalls += "$Method $Path"
     if ($Method -eq 'GET') {
@@ -371,12 +371,12 @@ $existingPackage = Ensure-Action1PackageByName -BaseUrl 'https://action1.invalid
     }
     throw 'POST should not be called for existing package'
 }
-Assert-Equal $existingPackage.id 'pkg-1' 'Ensure package returns existing exact-name package'
-Assert-True (($existingPackageCalls -join ',') -like 'GET /software-repository/all*') 'Ensure package searches software repository'
+Assert-Equal $existingPackage.id 'pkg-1' 'Resolve package returns existing exact-name package'
+Assert-True (($existingPackageCalls -join ',') -like 'GET /software-repository/all*') 'Resolve package searches software repository'
 
 $createdPackageCalls = @()
 $createdPackageBody = $null
-$createdPackage = Ensure-Action1PackageByName -BaseUrl 'https://action1.invalid/api/3.0' -OrgId 'all' -AccessToken 'token' -PackageName 'Autodesk Fusion Managed Updater' -RequestCommand {
+$createdPackage = Resolve-Action1PackageByName -BaseUrl 'https://action1.invalid/api/3.0' -OrgId 'all' -AccessToken 'token' -PackageName 'Autodesk Fusion Managed Updater' -RequestCommand {
     param($Method, $Path, $Body)
     $script:createdPackageCalls += "$Method $Path"
     if ($Method -eq 'GET') { return [pscustomobject]@{ items = @() } }
@@ -385,13 +385,13 @@ $createdPackage = Ensure-Action1PackageByName -BaseUrl 'https://action1.invalid/
         return [pscustomobject]@{ id = 'pkg-new'; name = $Body.name }
     }
 }
-Assert-Equal $createdPackage.id 'pkg-new' 'Ensure package creates missing package'
-Assert-True (($createdPackageCalls -join ',') -like '*POST /software-repository/all*') 'Ensure package posts missing package'
-Assert-Equal $createdPackageBody.name 'Autodesk Fusion Managed Updater' 'Ensure package create body uses requested package name'
-Assert-Equal $createdPackageBody.vendor 'Autodesk' 'Ensure package create body uses Autodesk vendor'
-Assert-Equal $createdPackageBody.platform 'Windows' 'Ensure package create body targets Windows'
-Assert-True ($createdPackageBody.description -like '*Historical versions are release records only*') 'Ensure package create body warns about historical records'
-Assert-True ($createdPackageBody.internal_notes -like '*Do not use this package for rollback*') 'Ensure package create body warns against rollback'
+Assert-Equal $createdPackage.id 'pkg-new' 'Resolve package creates missing package'
+Assert-True (($createdPackageCalls -join ',') -like '*POST /software-repository/all*') 'Resolve package posts missing package'
+Assert-Equal $createdPackageBody.name 'Autodesk Fusion Managed Updater' 'Resolve package create body uses requested package name'
+Assert-Equal $createdPackageBody.vendor 'Autodesk' 'Resolve package create body uses Autodesk vendor'
+Assert-Equal $createdPackageBody.platform 'Windows' 'Resolve package create body targets Windows'
+Assert-True ($createdPackageBody.description -like '*Historical versions are release records only*') 'Resolve package create body warns about historical records'
+Assert-True ($createdPackageBody.internal_notes -like '*Do not use this package for rollback*') 'Resolve package create body warns against rollback'
 
 $packageBody = New-Action1FusionPackageBody -PackageName 'Autodesk Fusion Managed Updater'
 Assert-Equal $packageBody.name 'Autodesk Fusion Managed Updater' 'Package body uses requested package name'
