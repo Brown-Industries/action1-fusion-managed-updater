@@ -252,7 +252,14 @@ function Invoke-FusionContainerSyncOnce {
         [string]$PowerShellCommand = 'pwsh'
     )
 
-    & $PowerShellCommand -NoProfile -ExecutionPolicy Bypass -File $ScriptPath
+    # Forward subprocess output line-by-line to console stdout. Without this, the child
+    # pwsh's stdout becomes pipeline objects on this function's output stream, which the
+    # entrypoint's `$null = ...` discards. Stderr (errors and curl progress) survives
+    # because it bypasses the PowerShell pipeline.
+    & $PowerShellCommand -NoProfile -ExecutionPolicy Bypass -File $ScriptPath 2>&1 | ForEach-Object {
+        [Console]::Out.WriteLine([string]$_)
+    }
+    [Console]::Out.Flush()
     $exitCode = $LASTEXITCODE
     if ($null -ne $exitCode -and $exitCode -ne 0) {
         throw "Fusion container sync script '$ScriptPath' exited with code $exitCode."
